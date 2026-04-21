@@ -40,8 +40,8 @@ function formatCompletedOutput(result: WaitResult): string {
 
 export async function bashTool(args: BashArgs, cwd: string, opts?: BashOpts): Promise<string> {
   // Validation
-  const hasCommand = args.command !== undefined;
-  const hasPid = args.pid !== undefined;
+  const hasCommand = args.command !== undefined && args.command !== "";
+  const hasPid = args.pid !== undefined && args.pid > 0;
 
   if (hasCommand && hasPid) {
     throw new Error("Provide 'command' or 'pid', not both.");

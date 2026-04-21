@@ -195,7 +195,10 @@ export function createServer(cwd: string, security: SecurityConfig = {}, opts?: 
       ? "Execute a bash command in a sandboxed environment (just-bash). Returns stdout and stderr combined. Output is truncated to the last 2000 lines or 50KB. Optionally provide a timeout in seconds. Note: sandbox does not support native binaries — only bash builtins and just-bash built-in commands."
       : `Execute a bash command, or manage a running process.
 
-To start a command: provide 'command' and optional 'timeout' in seconds.
+Call in one of two modes — do not mix them:
+  1. Start a command: pass 'command' (and optional 'timeout'). Omit 'pid' and 'kill'.
+  2. Manage a running process: pass 'pid' (and optional 'kill'). Omit 'command'.
+
 Returns stdout/stderr combined, truncated to last 2000 lines or 50KB.
 
 If a timeout is set and the command hasn't finished, partial output is returned with the process pid.
@@ -236,15 +239,24 @@ Use bash({ pid }) to wait for more output, or bash({ pid, kill: true }) to termi
           title: "Bash",
           description: bashDescription,
           inputSchema: {
-            command: z.string().optional().describe("Bash command to execute (required to start a new process)"),
-            pid: z.number().optional().describe("PID of a running process to reattach to or kill"),
+            command: z
+              .string()
+              .optional()
+              .describe("Bash command to execute. Provide this to start a new process; omit when managing an existing one via 'pid'."),
+            pid: z
+              .number()
+              .optional()
+              .describe("PID of a running process to reattach to or kill. Omit (do not pass 0) when starting a new command via 'command'."),
             timeout: z
               .number()
               .optional()
               .describe(
                 "Timeout in seconds. If the command hasn't finished by then, partial output is returned with the process pid.",
               ),
-            kill: z.boolean().optional().describe("Kill the process specified by pid"),
+            kill: z
+              .boolean()
+              .optional()
+              .describe("Kill the process specified by 'pid'. Only valid together with 'pid'; omit when starting a new command."),
           },
           annotations: {
             readOnlyHint: false,
