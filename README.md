@@ -73,10 +73,16 @@ Options:
       --host <address>           HTTP bind address (default: 127.0.0.1)
       --cwd <path>               Working directory for tools (default: current directory)
       --cors-origin <origin>     Allowed CORS origin (default: *)
-      --auth <mode>              Auth mode: oauth, bearer, none (default: oauth)
+      --auth <mode>              Auth mode: oauth, bearer, jwks, none (default: oauth)
       --auth-token <token>       Bearer token for HTTP auth (auto-generated if omitted)
       --tls-cert <path>          TLS certificate file (PEM) — enables HTTPS
       --tls-key <path>           TLS private key file (PEM)
+
+External JWKS / OIDC (--auth jwks — verify tokens from an external IdP):
+      --oauth-issuer <url>       Issuer URL; OIDC-discovers the JWKS endpoint
+      --jwks-url <url>           Explicit JWKS endpoint (overrides discovery)
+      --oauth-audience <aud>     Expected token audience (strongly recommended)
+      --jwks-scope-grants        Map tools:<name> token scopes to tool access
 
 Process management:
       --max-processes <number>   Max concurrent bash processes per session (default: 20)
@@ -154,6 +160,7 @@ Controlled by `--auth <mode>`:
 |------|-------------|
 | `oauth` (default) | OAuth 2.1 Authorization Code + PKCE, with a static bearer token as fallback |
 | `bearer` | Static bearer token only |
+| `jwks` | Resource-server mode: verifies JWT access tokens issued by an external OAuth/OIDC issuer (Auth0, Keycloak, Okta, Entra) via JWKS |
 | `none` | No authentication |
 
 #### OAuth 2.1 (`--auth oauth`)
@@ -189,6 +196,37 @@ Disable authentication entirely (e.g. behind a reverse proxy that handles auth):
 ```bash
 platter -t http --auth none
 ```
+
+#### External JWKS / OIDC (`--auth jwks`)
+
+In `jwks` mode platter acts as a pure **resource server**: it does not mint its own tokens. Instead it verifies JWT access tokens issued by an **external** OAuth/OIDC authorization server (Auth0, Keycloak, Okta, Microsoft Entra) — validating the signature against the issuer's JWKS, plus the `iss`, `aud`, and `exp` claims. This lets you put platter behind your existing IdP without a reverse proxy.
+
+```bash
+# Auth0 (root issuer)
+platter -t http --auth jwks \
+  --oauth-issuer https://YOUR_TENANT.auth0.com/ \
+  --oauth-audience https://platter.example.com/mcp
+
+# Keycloak (realm issuer)
+platter -t http --auth jwks \
+  --oauth-issuer https://kc.example.com/realms/myrealm \
+  --oauth-audience platter-api
+
+# Skip discovery / point at a JWKS endpoint directly
+platter -t http --auth jwks \
+  --jwks-url https://idp.example.com/.well-known/jwks.json \
+  --oauth-audience platter-api
+```
+
+**Audience validation (strongly recommended).** Set `--oauth-audience` to the API identifier configured in your IdP. If you omit it, platter accepts *any* valid token from the issuer — including tokens minted for a different resource server (a confused-deputy risk). platter prints a warning at startup when audience validation is disabled.
+
+**Discovery.** With `--oauth-issuer`, platter fetches the issuer's `/.well-known/openid-configuration` (falling back to `/.well-known/oauth-authorization-server`) at startup to find the `jwks_uri` and re-advertise the authorization server to RFC 9728-capable MCP clients (at `/.well-known/oauth-protected-resource/mcp`). Pass `--jwks-url` to skip discovery, or if the IdP isn't reachable at startup. If discovery fails but `--jwks-url` is set, token verification still works — only the RFC 9728 auto-advertisement is skipped.
+
+**Authorization (what a token can do).** By default a verified token gets admin-level access, bounded only by the operator's CLI restrictions (`--tools`, `--allow-path`, `--allow-command`, `--sandbox`) — the IdP controls *who* gets in, the CLI flags control *what* they can do. Pass `--jwks-scope-grants` to additionally honor `tools:<name>` scopes in the token (e.g. `tools:read tools:bash`), which further narrow the granted tools (they can only narrow, never widen the operator's ceiling). The `scope` claim and Entra-style `scp` claim are both supported. Tokens without any `tools:*` scope fall back to admin-level.
+
+**No static fallback.** Unlike `oauth` mode, `jwks` mode accepts *only* externally-issued JWTs — `--auth-token` is rejected.
+
+> **Note:** `MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL` is unrelated to this mode. It only concerns platter serving its *own* issuer over http in `--auth oauth` mode. An external `https` issuer needs no such flag. If you point `--auth jwks` at a plain-`http` issuer (e.g. a localhost Keycloak), platter warns and skips RFC 9728 metadata advertisement, but token verification still works.
 
 ### TLS (HTTPS)
 
@@ -281,6 +319,7 @@ This installs:
 
 - **TLS (HTTPS)** - optional transport encryption via `--tls-cert` and `--tls-key`. Uses Node.js `https` module with PEM-encoded certificate and key files.
 - **OAuth 2.1 + PKCE** (`--auth oauth`, default) - MCP clients authenticate via Authorization Code flow with PKCE ([RFC 7636](https://datatracker.ietf.org/doc/html/rfc7636)). Supports dynamic client registration ([RFC 7591](https://datatracker.ietf.org/doc/html/rfc7591)) and token revocation ([RFC 7009](https://datatracker.ietf.org/doc/html/rfc7009)).
+- **External JWKS / OIDC** (`--auth jwks`) - resource-server mode: platter verifies JWT access tokens from an external issuer (Auth0, Keycloak, Okta, Entra) against the issuer's JWKS, validating signature, `iss`, `aud`, and `exp`. Asymmetric algorithms only (`alg: none` and HMAC are rejected). See the **External JWKS / OIDC** section under [Authentication](#authentication) for configuration.
 - **Out-of-band consent confirmation** - the OAuth consent page requires a confirmation code that is only displayed to the platter operator (via stderr or desktop notification). This prevents CSRF and cross-origin attacks from auto-approving authorization requests. The consent page is also protected with `X-Frame-Options: DENY`, `Sec-Fetch-Site` validation, and `Origin` header checking.
 - **Bearer token authentication** - a static bearer token (RFC 6750) is available as a fallback in `oauth` mode and as the sole method in `bearer` mode. A random 256-bit token is generated at startup unless you provide `--auth-token` or set `--auth none`.
 - **Host header validation** - prevents [DNS rebinding attacks](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-w48q-cv73-mx4w). Localhost binds accept only `127.0.0.1`, `localhost`, and `::1`; remote binds accept only the specified `--host`.

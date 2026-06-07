@@ -31,10 +31,16 @@ Options:
       --host <address>           HTTP bind address (default: 127.0.0.1)
       --cwd <path>               Working directory for tools (default: current directory)
       --cors-origin <origin>     Allowed CORS origin (default: *)
-      --auth <mode>              Auth mode: oauth, bearer, none (default: oauth)
+      --auth <mode>              Auth mode: oauth, bearer, jwks, none (default: oauth)
       --auth-token <token>       Bearer token for HTTP auth (auto-generated if omitted)
       --tls-cert <path>          TLS certificate file (PEM) — enables HTTPS
       --tls-key <path>           TLS private key file (PEM)
+
+External JWKS / OIDC (--auth jwks — verify tokens from an external IdP):
+      --oauth-issuer <url>       Issuer URL; OIDC-discovers the JWKS endpoint
+      --jwks-url <url>           Explicit JWKS endpoint (overrides discovery)
+      --oauth-audience <aud>     Expected token audience (strongly recommended)
+      --jwks-scope-grants        Map tools:<name> token scopes to tool access
 
 Process management:
       --max-processes <number>   Max concurrent bash processes per session (default: 20)
@@ -78,6 +84,10 @@ const { values } = parseArgs({
     "cors-origin": { type: "string", default: "*" },
     auth: { type: "string", default: "oauth" },
     "auth-token": { type: "string" },
+    "oauth-issuer": { type: "string" },
+    "jwks-url": { type: "string" },
+    "oauth-audience": { type: "string" },
+    "jwks-scope-grants": { type: "boolean", default: false },
     tools: { type: "string" },
     "allow-path": { type: "string", multiple: true },
     "allow-command": { type: "string", multiple: true },
@@ -122,7 +132,7 @@ if (values.transport !== "stdio" && values.transport !== "http") {
   process.exit(1);
 }
 
-const VALID_AUTH_MODES = ["oauth", "bearer", "none"];
+const VALID_AUTH_MODES = ["oauth", "bearer", "none", "jwks"];
 const authMode = values.auth!;
 if (!VALID_AUTH_MODES.includes(authMode)) {
   console.error(`Error: invalid --auth mode "${authMode}". Must be one of: ${VALID_AUTH_MODES.join(", ")}\n`);
@@ -134,6 +144,58 @@ if (values["auth-token"] && authMode === "none") {
   console.error("Error: --auth-token and --auth none are mutually exclusive.\n");
   console.error(USAGE);
   process.exit(1);
+}
+
+// External JWKS / OIDC mode validation. These checks (and warnings) run at
+// module load, before any server binds, so the CLI fails fast and tests don't
+// need a live socket.
+function assertUrl(flag: string, value: string): void {
+  try {
+    new URL(value);
+  } catch {
+    console.error(`Error: ${flag} must be a valid URL, got "${value}".\n`);
+    console.error(USAGE);
+    process.exit(1);
+  }
+}
+
+if (authMode === "jwks") {
+  if (!values["oauth-issuer"] && !values["jwks-url"]) {
+    console.error("Error: --auth jwks requires --oauth-issuer <url> (or --jwks-url <url>).\n");
+    console.error(USAGE);
+    process.exit(1);
+  }
+  if (values["oauth-issuer"]) assertUrl("--oauth-issuer", values["oauth-issuer"]);
+  if (values["jwks-url"]) assertUrl("--jwks-url", values["jwks-url"]);
+
+  // No static fallback in jwks mode — the external IdP is the sole token source.
+  if (values["auth-token"]) {
+    console.error("Error: --auth-token is not used in jwks mode (the external IdP issues tokens).\n");
+    console.error(USAGE);
+    process.exit(1);
+  }
+
+  if (!values["oauth-audience"]) {
+    console.error(
+      "Warning: --auth jwks without --oauth-audience disables audience validation.\n" +
+        "  Any valid token from the issuer is accepted, including tokens minted for OTHER\n" +
+        "  resource servers (confused-deputy risk). Set --oauth-audience to your MCP server's\n" +
+        "  API identifier.\n",
+    );
+  }
+
+  // An http issuer is insecure (JWKS fetched in the clear). Allowed for local
+  // dev (e.g. a localhost Keycloak), but warn. This is platter's own warning and
+  // is unrelated to MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL, which only gates
+  // platter's OWN issuer in `--auth oauth` mode.
+  const issuerForScheme = values["oauth-issuer"] ?? values["jwks-url"];
+  if (issuerForScheme?.startsWith("http://")) {
+    console.error(`Warning: external issuer "${issuerForScheme}" uses http — JWKS is fetched insecurely. Use https.\n`);
+  }
+} else if (values["oauth-issuer"] || values["jwks-url"] || values["oauth-audience"] || values["jwks-scope-grants"]) {
+  console.error(
+    `Warning: --oauth-issuer/--jwks-url/--oauth-audience/--jwks-scope-grants have no effect with --auth ${authMode}.\n`,
+  );
 }
 
 if ((values["tls-cert"] && !values["tls-key"]) || (!values["tls-cert"] && values["tls-key"])) {
@@ -259,6 +321,8 @@ async function runStdio() {
 
 async function resolveAuthToken(): Promise<string | null> {
   if (authMode === "none") return null;
+  // jwks mode accepts only externally-issued JWTs — no static bearer at all.
+  if (authMode === "jwks") return null;
   if (values["auth-token"]) return values["auth-token"]!;
 
   // Try the system keyring first, then fall back to the config file.
@@ -292,6 +356,19 @@ async function runHttp() {
     security.allowedTools = new Set(persistedConfig.enabledTools);
   }
 
+  // External JWKS / OIDC — enabled in "jwks" auth mode. Platter acts as a pure
+  // resource server; the issuer/JWKS resolution and verification live in the
+  // HttpController. Mutually exclusive with the OAuth provider below.
+  const externalAuth =
+    authMode === "jwks"
+      ? {
+          issuer: values["oauth-issuer"],
+          jwksUrl: values["jwks-url"],
+          audience: values["oauth-audience"],
+          scopeGrants: values["jwks-scope-grants"],
+        }
+      : undefined;
+
   // OAuth 2.1 Authorization Code + PKCE — enabled in "oauth" auth mode.
   let oauthProvider: PlatterOAuthProvider | undefined;
   if (authMode === "oauth") {
@@ -323,6 +400,7 @@ async function runHttp() {
     corsOrigin,
     authToken: token,
     oauthProvider,
+    externalAuth,
     maxSessions,
     tlsCert: values["tls-cert"],
     tlsKey: values["tls-key"],
@@ -335,6 +413,16 @@ async function runHttp() {
   console.error(`Auth mode: ${authMode}`);
   if (oauthProvider) {
     console.error("OAuth 2.1 + PKCE enabled (dynamic client registration at /register)");
+  }
+  if (externalAuth) {
+    if (externalAuth.issuer) console.error(`External issuer: ${externalAuth.issuer}`);
+    if (externalAuth.jwksUrl) console.error(`JWKS URL: ${externalAuth.jwksUrl}`);
+    console.error(
+      externalAuth.audience
+        ? `Expected audience: ${externalAuth.audience}`
+        : "Expected audience: (none — audience validation disabled)",
+    );
+    if (externalAuth.scopeGrants) console.error("Scope grants: tools:<name> token scopes narrow tool access");
   }
   if (token) {
     if (values["auth-token"]) {

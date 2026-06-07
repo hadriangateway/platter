@@ -4,17 +4,23 @@ import type { Server as HttpsServer, Server } from "node:http";
 import https from "node:https";
 import { resolve, sep } from "node:path";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import {
+  getOAuthProtectedResourceMetadataUrl,
+  mcpAuthMetadataRouter,
+  mcpAuthRouter,
+} from "@modelcontextprotocol/sdk/server/auth/router.js";
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   hostHeaderValidation,
   localhostHostValidation,
 } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { OAuthMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { RequestHandler } from "express";
 import express from "express";
 import { type GlobalRestrictions, installConsentRoutes, toolScope } from "../oauth/consent.js";
 import { DualVerifier } from "../oauth/dual-verifier.js";
+import { ExternalJwtVerifier } from "../oauth/external-verifier.js";
 import type { ClientGrant, PlatterOAuthProvider } from "../oauth/provider.js";
 import type { ProcessRegistry } from "../process-registry.js";
 import { ALL_TOOL_NAMES, isToolEnabled, type SecurityConfig, type ToolName } from "../security.js";
@@ -44,6 +50,17 @@ export interface HttpControllerOptions {
   authToken: string | null;
   /** When set, enables OAuth 2.1 Authorization Code + PKCE alongside legacy bearer auth. */
   oauthProvider?: PlatterOAuthProvider;
+  /**
+   * When set, platter acts as a pure resource server: it verifies JWT access
+   * tokens issued by an external OAuth/OIDC issuer via JWKS. Mutually exclusive
+   * with `oauthProvider`.
+   */
+  externalAuth?: {
+    issuer?: string;
+    jwksUrl?: string;
+    audience?: string;
+    scopeGrants?: boolean;
+  };
   maxSessions?: number;
   tlsCert?: string;
   tlsKey?: string;
@@ -146,7 +163,7 @@ export class HttpController {
     return this.starting;
   }
 
-  private bind(): Promise<void> {
+  private async bind(): Promise<void> {
     const app = express();
     const { host, corsOrigin } = this.opts;
 
@@ -226,6 +243,65 @@ export class HttpController {
       );
 
       const verifier = new DualVerifier(provider, () => this.authToken);
+      mcpAuth = requireBearerAuth({
+        verifier,
+        requiredScopes: [],
+        resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(mcpServerUrl),
+      });
+    } else if (this.opts.externalAuth) {
+      // External JWKS mode: platter is a pure resource server. Verify JWT
+      // access tokens issued by an external OAuth/OIDC issuer; never mint our
+      // own tokens, and run no consent flow.
+      const ext = this.opts.externalAuth;
+      const proto = this.opts.tlsCert && this.opts.tlsKey ? "https" : "http";
+      const mcpServerUrl = new URL(`${proto}://${this.opts.host}:${this.opts.port}/mcp`);
+
+      // Resolve the JWKS endpoint. An explicit --jwks-url wins; otherwise
+      // discover it from the issuer's well-known metadata. Discovery also
+      // yields the AS metadata we re-advertise for RFC 9728 clients.
+      let discovered: Record<string, unknown> | null = null;
+      if (ext.issuer) {
+        discovered = await discoverAuthServerMetadata(ext.issuer);
+      }
+      const jwksUrlStr = ext.jwksUrl ?? (typeof discovered?.jwks_uri === "string" ? discovered.jwks_uri : undefined);
+      if (!jwksUrlStr) {
+        throw new Error(
+          ext.issuer
+            ? `Could not discover a JWKS endpoint from issuer "${ext.issuer}". Pass --jwks-url explicitly.`
+            : "jwks mode requires --jwks-url or --oauth-issuer.",
+        );
+      }
+
+      // Best-effort RFC 9728 advertisement. Requires a schema-valid OAuthMetadata
+      // with an https (or localhost) issuer; when discovery yields nothing, or
+      // the issuer is plain http, skip it — token verification is unaffected.
+      const oauthMetadata = buildOAuthMetadata(ext.issuer, discovered);
+      if (oauthMetadata) {
+        try {
+          app.use(
+            mcpAuthMetadataRouter({
+              oauthMetadata,
+              resourceServerUrl: mcpServerUrl,
+              scopesSupported: ALL_TOOL_NAMES.map(toolScope),
+              resourceName: "Platter MCP Server",
+            }),
+          );
+          console.error(`[jwks] advertising protected-resource metadata (issuer: ${oauthMetadata.issuer})`);
+        } catch (err) {
+          console.error(
+            `[jwks] resource metadata not advertised (${(err as Error)?.message ?? err}); verification still works`,
+          );
+        }
+      } else {
+        console.error("[jwks] no authorization-server metadata available — RFC 9728 discovery disabled");
+      }
+
+      const verifier = new ExternalJwtVerifier({
+        jwksUrl: new URL(jwksUrlStr),
+        issuer: ext.issuer,
+        audience: ext.audience,
+        scopeGrants: ext.scopeGrants,
+      });
       mcpAuth = requireBearerAuth({
         verifier,
         requiredScopes: [],
@@ -500,4 +576,56 @@ export function buildSessionSecurity(global: SecurityConfig, grant: ClientGrant 
   }
 
   return sessionSecurity;
+}
+
+/**
+ * Fetch an external issuer's authorization-server metadata. Tries the OIDC
+ * discovery document first, then the RFC 8414 OAuth document. The well-known
+ * suffix is appended to the FULL issuer path (correct for Auth0 root issuers
+ * and Keycloak realm issuers alike). Best-effort: returns null on any failure.
+ */
+async function discoverAuthServerMetadata(issuer: string): Promise<Record<string, unknown> | null> {
+  const base = issuer.replace(/\/+$/, "");
+  for (const suffix of [".well-known/openid-configuration", ".well-known/oauth-authorization-server"]) {
+    try {
+      const res = await fetch(`${base}/${suffix}`, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) continue;
+      const json = (await res.json()) as unknown;
+      if (json && typeof json === "object") return json as Record<string, unknown>;
+    } catch {
+      // Try the next well-known location; discovery is best-effort.
+    }
+  }
+  return null;
+}
+
+/**
+ * Assemble a schema-valid `OAuthMetadata` from a discovered metadata document
+ * for re-advertisement via `mcpAuthMetadataRouter`. Returns null when the
+ * required fields (issuer, authorization_endpoint, token_endpoint) are absent —
+ * e.g. discovery failed and only `--jwks-url` was provided — so the caller skips
+ * advertisement rather than fabricating placeholders.
+ */
+function buildOAuthMetadata(
+  issuer: string | undefined,
+  discovered: Record<string, unknown> | null,
+): OAuthMetadata | null {
+  if (!discovered) return null;
+  const iss = typeof discovered.issuer === "string" ? discovered.issuer : issuer;
+  const authEndpoint = discovered.authorization_endpoint;
+  const tokenEndpoint = discovered.token_endpoint;
+  if (typeof iss !== "string" || typeof authEndpoint !== "string" || typeof tokenEndpoint !== "string") {
+    return null;
+  }
+  const responseTypes = discovered.response_types_supported;
+  return {
+    ...discovered,
+    issuer: iss,
+    authorization_endpoint: authEndpoint,
+    token_endpoint: tokenEndpoint,
+    response_types_supported: Array.isArray(responseTypes) ? (responseTypes as string[]) : ["code"],
+  } as OAuthMetadata;
 }
