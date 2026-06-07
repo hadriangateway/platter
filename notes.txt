@@ -1,0 +1,12 @@
+HTTPS commit
+Handle cancelled requests
+Show tool use before finishes
+Toggle sending tool results and reasoning in new messages
+Handle OOMed commands as errors
+
+Soft timeout tasks
+Way for user to intervene between rounds?
+Run TS? Interpreter per session that loads esm, allows running arbitrary statements. Like cloudflare's code mode
+Is each chat session its own MCP session?
+ClawHub skills integration?
+User / session specific namespacing?

@@ -242,11 +242,15 @@ Use bash({ pid }) to wait for more output, or bash({ pid, kill: true }) to termi
             command: z
               .string()
               .optional()
-              .describe("Bash command to execute. Provide this to start a new process; omit when managing an existing one via 'pid'."),
+              .describe(
+                "Bash command to execute. Provide this to start a new process; omit when managing an existing one via 'pid'.",
+              ),
             pid: z
               .number()
               .optional()
-              .describe("PID of a running process to reattach to or kill. Omit (do not pass 0) when starting a new command via 'command'."),
+              .describe(
+                "PID of a running process to reattach to or kill. Omit (do not pass 0) when starting a new command via 'command'.",
+              ),
             timeout: z
               .number()
               .optional()
@@ -256,7 +260,9 @@ Use bash({ pid }) to wait for more output, or bash({ pid, kill: true }) to termi
             kill: z
               .boolean()
               .optional()
-              .describe("Kill the process specified by 'pid'. Only valid together with 'pid'; omit when starting a new command."),
+              .describe(
+                "Kill the process specified by 'pid'. Only valid together with 'pid'; omit when starting a new command.",
+              ),
           },
           annotations: {
             readOnlyHint: false,
