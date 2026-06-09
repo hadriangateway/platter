@@ -37,10 +37,19 @@ export interface CreateServerResult {
 }
 
 export function createServer(cwd: string, security: SecurityConfig = {}, opts?: CreateServerOpts): CreateServerResult {
-  const server = new McpServer({
-    name: "platter",
-    version: packageJson.version,
-  });
+  const server = new McpServer(
+    {
+      name: "platter",
+      version: packageJson.version,
+    },
+    {
+      instructions: [
+        "Platter gives you controlled access to this computer's files and shell.",
+        "Prefer the dedicated file tools (read, write, edit, glob, grep) over bash equivalents (cat, sed, find, grep), since they validate paths against the server's security policy and produce consistent output.",
+        "Access may be restricted: file operations can be limited to allowed directories, bash commands checked against a whitelist, and individual tools enabled or disabled at runtime, so the available tool list can change mid-session. A rejected path or command is a policy decision; adjust your approach rather than retrying it verbatim.",
+      ].join("\n"),
+    },
+  );
 
   const registry = new ProcessRegistry({ maxConcurrent: opts?.maxProcesses ?? 20 });
   const registeredTools = new Map<ToolName, RegisteredTool>();
