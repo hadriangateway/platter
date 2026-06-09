@@ -1,16 +1,16 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.ScriptSmith/platter",
+  "name": "io.github.hadriangateway/platter",
   "description": "MCP server exposing Read, Write, Edit, Bash, Glob, Grep, and JS tools over stdio.",
   "title": "Platter",
   "version": "__VERSION__",
   "repository": {
-    "url": "https://github.com/ScriptSmith/platter",
+    "url": "https://github.com/hadriangateway/platter",
     "source": "github"
   },
   "icons": [
     {
-      "src": "https://github.com/ScriptSmith/platter/releases/download/v__VERSION__/icon.png",
+      "src": "https://github.com/hadriangateway/platter/releases/download/v__VERSION__/icon.png",
       "mimeType": "image/png",
       "sizes": ["512x512"]
     }
@@ -18,36 +18,36 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/ScriptSmith/platter/releases/download/v__VERSION__/platter-linux-x64.mcpb",
+      "identifier": "https://github.com/hadriangateway/platter/releases/download/v__VERSION__/platter-linux-x64.mcpb",
       "fileSha256": "__SHA256_LINUX_X64__",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/ScriptSmith/platter/releases/download/v__VERSION__/platter-linux-arm64.mcpb",
+      "identifier": "https://github.com/hadriangateway/platter/releases/download/v__VERSION__/platter-linux-arm64.mcpb",
       "fileSha256": "__SHA256_LINUX_ARM64__",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/ScriptSmith/platter/releases/download/v__VERSION__/platter-darwin-x64.mcpb",
+      "identifier": "https://github.com/hadriangateway/platter/releases/download/v__VERSION__/platter-darwin-x64.mcpb",
       "fileSha256": "__SHA256_DARWIN_X64__",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/ScriptSmith/platter/releases/download/v__VERSION__/platter-darwin-arm64.mcpb",
+      "identifier": "https://github.com/hadriangateway/platter/releases/download/v__VERSION__/platter-darwin-arm64.mcpb",
       "fileSha256": "__SHA256_DARWIN_ARM64__",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/scriptsmith/platter:__VERSION__",
+      "identifier": "ghcr.io/hadriangateway/platter:__VERSION__",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/scriptsmith/platter:__VERSION__",
+      "identifier": "ghcr.io/hadriangateway/platter:__VERSION__",
       "runtimeHint": "docker",
       "transport": {
         "type": "streamable-http",

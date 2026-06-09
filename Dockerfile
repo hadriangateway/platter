@@ -7,7 +7,7 @@ COPY tsconfig.json ./
 RUN bun build src/index.ts --compile --external x11 --outfile=platter
 
 FROM debian:bookworm-slim
-LABEL io.modelcontextprotocol.server.name="io.github.ScriptSmith/platter"
+LABEL io.modelcontextprotocol.server.name="io.github.hadriangateway/platter"
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ripgrep ca-certificates \
  && rm -rf /var/lib/apt/lists/*

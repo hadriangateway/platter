@@ -6,16 +6,16 @@
   "description": "MCP server exposing Read, Write, Edit, Bash, Glob, Grep, and JS tools over stdio.",
   "long_description": "Platter gives AI agents controlled access to a computer's resources — filesystem, shell, and a persistent JavaScript runtime. Ships as a single standalone binary with configurable path/command allowlists and an optional sandboxed bash mode.",
   "author": {
-    "name": "ScriptSmith",
-    "url": "https://github.com/ScriptSmith"
+    "name": "hadriangateway",
+    "url": "https://github.com/hadriangateway"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/ScriptSmith/platter"
+    "url": "https://github.com/hadriangateway/platter"
   },
-  "homepage": "https://github.com/ScriptSmith/platter",
-  "documentation": "https://github.com/ScriptSmith/platter#readme",
-  "support": "https://github.com/ScriptSmith/platter/issues",
+  "homepage": "https://github.com/hadriangateway/platter",
+  "documentation": "https://github.com/hadriangateway/platter#readme",
+  "support": "https://github.com/hadriangateway/platter/issues",
   "license": "MIT",
   "icon": "icon.png",
   "keywords": ["filesystem", "bash", "shell", "developer-tools", "ripgrep"],

@@ -631,7 +631,7 @@ function notify(title: string, body: string, opts: NotifyOptions = {}): void {
   child.unref();
 }
 
-const REPO_URL = "https://github.com/ScriptSmith/platter";
+const REPO_URL = "https://github.com/hadriangateway/platter";
 const COPYRIGHT = "Copyright © 2026 Adam Smith";
 const LICENSE = "MIT License";
 

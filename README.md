@@ -26,12 +26,12 @@ Designed to be used by browser-based (or any MCP-compatible) agents, like [Hadri
 
 ### From a release binary
 
-Download the latest binary for your platform from [Releases](https://github.com/ScriptSmith/platter/releases), or grab it with `curl`:
+Download the latest binary for your platform from [Releases](https://github.com/hadriangateway/platter/releases), or grab it with `curl`:
 
 ```bash
 # Download (replace the filename for your platform)
 # Available: platter-linux-x64, platter-linux-arm64, platter-darwin-x64, platter-darwin-arm64
-curl -fsSL https://github.com/ScriptSmith/platter/releases/latest/download/platter-linux-x64 -o platter
+curl -fsSL https://github.com/hadriangateway/platter/releases/latest/download/platter-linux-x64 -o platter
 chmod +x platter
 
 ./platter          # stdio mode
@@ -41,8 +41,8 @@ chmod +x platter
 ### Docker
 
 ```bash
-docker run --rm -i ghcr.io/scriptsmith/platter                                   # stdio mode
-docker run --rm -p 3100:3100 ghcr.io/scriptsmith/platter -t http --host 0.0.0.0  # HTTP mode
+docker run --rm -i ghcr.io/hadriangateway/platter                                   # stdio mode
+docker run --rm -p 3100:3100 ghcr.io/hadriangateway/platter -t http --host 0.0.0.0  # HTTP mode
 ```
 
 See [Docker](#docker-1) below for mounting paths, networking, installing extra software, and building custom images.
@@ -391,17 +391,17 @@ Running platter inside a Docker container provides OS-level isolation via Linux 
 
 ```bash
 # Minimal: no host filesystem, no network
-docker run --rm -i --network none ghcr.io/scriptsmith/platter
+docker run --rm -i --network none ghcr.io/hadriangateway/platter
 
 # Read-only project access, no bash
 docker run --rm -p 3100:3100 \
   -v /home/user/project:/work:ro \
-  ghcr.io/scriptsmith/platter -t http --host 0.0.0.0 --tools read,glob,grep
+  ghcr.io/hadriangateway/platter -t http --host 0.0.0.0 --tools read,glob,grep
 
 # Full tools, scoped to a mounted directory
 docker run --rm -p 3100:3100 \
   -v /home/user/project:/work \
-  ghcr.io/scriptsmith/platter -t http --host 0.0.0.0 --allow-path /work
+  ghcr.io/hadriangateway/platter -t http --host 0.0.0.0 --allow-path /work
 ```
 
 #### What the container enforces
@@ -428,12 +428,12 @@ The just-bash sandbox and Docker container address different layers. Used togeth
 # Maximum isolation: sandbox inside a container, overlay fs, no network
 docker run --rm -i --network none \
   -v /home/user/project:/work:ro \
-  ghcr.io/scriptsmith/platter --sandbox --sandbox-fs overlay
+  ghcr.io/hadriangateway/platter --sandbox --sandbox-fs overlay
 
 # Sandbox with controlled network access inside a container
 docker run --rm -p 3100:3100 \
   -v /home/user/project:/work \
-  ghcr.io/scriptsmith/platter -t http --host 0.0.0.0 \
+  ghcr.io/hadriangateway/platter -t http --host 0.0.0.0 \
     --sandbox --sandbox-allow-url "https://api.github.com"
 ```
 
@@ -445,7 +445,7 @@ docker run --rm -p 3100:3100 \
   --cap-drop ALL \
   --read-only --tmpfs /tmp \
   -v /home/user/project:/work \
-  ghcr.io/scriptsmith/platter -t http --host 0.0.0.0 --sandbox
+  ghcr.io/hadriangateway/platter -t http --host 0.0.0.0 --sandbox
 ```
 
 See [Docker](#docker-1) for full usage instructions including mounting paths, networking, and building custom images.
@@ -455,8 +455,8 @@ See [Docker](#docker-1) for full usage instructions including mounting paths, ne
 The Docker image is based on Debian Bookworm (slim) and includes ripgrep. Multi-arch images (`linux/amd64`, `linux/arm64`) are published to GitHub Container Registry on every tagged release.
 
 ```bash
-docker pull ghcr.io/scriptsmith/platter        # latest release
-docker pull ghcr.io/scriptsmith/platter:1.0.0  # specific version
+docker pull ghcr.io/hadriangateway/platter        # latest release
+docker pull ghcr.io/hadriangateway/platter:1.0.0  # specific version
 ```
 
 ### Running in stdio mode
@@ -464,7 +464,7 @@ docker pull ghcr.io/scriptsmith/platter:1.0.0  # specific version
 Pipe JSON-RPC messages via stdin/stdout:
 
 ```bash
-docker run --rm -i ghcr.io/scriptsmith/platter
+docker run --rm -i ghcr.io/hadriangateway/platter
 ```
 
 ### Running in HTTP mode
@@ -472,7 +472,7 @@ docker run --rm -i ghcr.io/scriptsmith/platter
 Bind to `0.0.0.0` inside the container so the port is reachable from the host:
 
 ```bash
-docker run --rm -p 3100:3100 ghcr.io/scriptsmith/platter -t http --host 0.0.0.0
+docker run --rm -p 3100:3100 ghcr.io/hadriangateway/platter -t http --host 0.0.0.0
 ```
 
 ### Mounting paths
@@ -483,18 +483,18 @@ Mount host directories into the container and use `--cwd` or `--allow-path` to g
 # Mount a project directory as the working directory
 docker run --rm -p 3100:3100 \
   -v /home/user/project:/work \
-  ghcr.io/scriptsmith/platter -t http --host 0.0.0.0
+  ghcr.io/hadriangateway/platter -t http --host 0.0.0.0
 
 # Mount read-only
 docker run --rm -p 3100:3100 \
   -v /home/user/project:/work:ro \
-  ghcr.io/scriptsmith/platter -t http --host 0.0.0.0 --tools read,glob,grep
+  ghcr.io/hadriangateway/platter -t http --host 0.0.0.0 --tools read,glob,grep
 
 # Mount multiple directories with path restrictions
 docker run --rm -p 3100:3100 \
   -v /home/user/project:/project \
   -v /tmp/scratch:/scratch \
-  ghcr.io/scriptsmith/platter -t http --host 0.0.0.0 \
+  ghcr.io/hadriangateway/platter -t http --host 0.0.0.0 \
     --cwd /project \
     --allow-path /project --allow-path /scratch
 ```
@@ -505,10 +505,10 @@ By default containers have full outbound network access. You can restrict this w
 
 ```bash
 # No network access (file-only tools)
-docker run --rm --network none -i ghcr.io/scriptsmith/platter
+docker run --rm --network none -i ghcr.io/hadriangateway/platter
 
 # Access host services (e.g. a local database)
-docker run --rm -p 3100:3100 --network host ghcr.io/scriptsmith/platter -t http --host 0.0.0.0
+docker run --rm -p 3100:3100 --network host ghcr.io/hadriangateway/platter -t http --host 0.0.0.0
 ```
 
 ### Installing additional software at runtime
@@ -516,14 +516,14 @@ docker run --rm -p 3100:3100 --network host ghcr.io/scriptsmith/platter -t http 
 The image uses Debian, so you can install packages with `apt-get` at runtime. This is useful for quick experiments but adds startup latency. For production use, build a custom image instead (see below).
 
 ```bash
-docker run --rm -p 3100:3100 ghcr.io/scriptsmith/platter \
+docker run --rm -p 3100:3100 ghcr.io/hadriangateway/platter \
   bash -c "apt-get update && apt-get install -y git nodejs && exec platter -t http --host 0.0.0.0"
 ```
 
 Or interactively:
 
 ```bash
-docker run --rm -it --entrypoint bash ghcr.io/scriptsmith/platter
+docker run --rm -it --entrypoint bash ghcr.io/hadriangateway/platter
 # inside the container:
 apt-get update && apt-get install -y git python3
 platter -t http --host 0.0.0.0
@@ -534,7 +534,7 @@ platter -t http --host 0.0.0.0
 Layer additional tools on top of the platter image for a ready-to-use environment:
 
 ```dockerfile
-FROM ghcr.io/scriptsmith/platter:latest
+FROM ghcr.io/hadriangateway/platter:latest
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \

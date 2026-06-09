@@ -1,6 +1,6 @@
 [Unit]
 Description=Platter MCP server (tray)
-Documentation=https://github.com/ScriptSmith/platter
+Documentation=https://github.com/hadriangateway/platter
 After=graphical-session.target
 PartOf=graphical-session.target
 
