@@ -1,6 +1,6 @@
 {
   "name": "platter",
-  "version": "2.0.2-rc7",
+  "version": "2.0.3",
   "type": "module",
   "description": "MCP server providing Read, Write, Edit, Bash, Glob, and Grep tools",
   "scripts": {
