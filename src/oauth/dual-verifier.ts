@@ -1,6 +1,7 @@
 import { InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { safeStrEqual } from "../utils.js";
 import type { PlatterOAuthProvider } from "./provider.js";
 
 /**
@@ -24,7 +25,7 @@ export class DualVerifier implements OAuthTokenVerifier {
 
     // Legacy static bearer token.
     const legacy = this.getLegacyToken();
-    if (legacy && token === legacy) {
+    if (legacy && safeStrEqual(token, legacy)) {
       // No grant attached — per-session security falls back to the global
       // config unmodified (legacy bearer is an admin-level credential).
       return {

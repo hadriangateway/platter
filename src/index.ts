@@ -41,6 +41,8 @@ External JWKS / OIDC (--auth jwks — verify tokens from an external IdP):
       --jwks-url <url>           Explicit JWKS endpoint (overrides discovery)
       --oauth-audience <aud>     Expected token audience (strongly recommended)
       --jwks-scope-grants        Map tools:<name> token scopes to tool access
+                                 (fail closed: a token with no tools:<name>
+                                 scopes is granted no tools)
 
 Process management:
       --max-processes <number>   Max concurrent bash processes per session (default: 20)
@@ -241,15 +243,18 @@ if (values["allow-path"]?.length) {
 }
 
 if (values["allow-command"]?.length) {
-  security.allowedCommands = [];
+  // The CLI patterns form a single group (the global restriction). A per-client
+  // grant adds further groups at session-build time; see buildSessionSecurity.
+  const globalGroup: RegExp[] = [];
   for (const pattern of values["allow-command"]) {
     try {
-      security.allowedCommands.push(new RegExp(`^(?:${pattern})$`));
+      globalGroup.push(new RegExp(`^(?:${pattern})$`));
     } catch (e: any) {
       console.error(`Error: invalid --allow-command regex "${pattern}": ${e.message}\n`);
       process.exit(1);
     }
   }
+  security.allowedCommands = [globalGroup];
 }
 
 const VALID_SANDBOX_FS_MODES = ["memory", "overlay", "readwrite"];

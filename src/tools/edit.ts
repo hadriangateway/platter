@@ -246,6 +246,23 @@ export async function editTool(
       }
     }
 
+    // Fuzzy matching maps a position in the normalized text back to the original
+    // via line:col. Because normalization changes per-line length (trailing-
+    // whitespace trim, NFKC), that mapping can drift and mis-bound the slice we
+    // replace. Guard against a silent mis-edit: re-normalize the slice we're
+    // about to replace and require it to equal the normalized old_text.
+    if (matchResult.usedFuzzyMatch) {
+      const matchedSlice = normalizedContent.substring(
+        matchResult.originalIndex,
+        matchResult.originalIndex + matchResult.originalMatchLength,
+      );
+      if (normalizeForFuzzyMatch(matchedSlice) !== normalizeForFuzzyMatch(normalizedOldText)) {
+        throw new Error(
+          `Could not safely locate the text to replace in ${args.path}. Provide old_text that matches exactly (including whitespace).`,
+        );
+      }
+    }
+
     newContent =
       normalizedContent.substring(0, matchResult.originalIndex) +
       normalizedNewText +

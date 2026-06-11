@@ -83,6 +83,8 @@ External JWKS / OIDC (--auth jwks — verify tokens from an external IdP):
       --jwks-url <url>           Explicit JWKS endpoint (overrides discovery)
       --oauth-audience <aud>     Expected token audience (strongly recommended)
       --jwks-scope-grants        Map tools:<name> token scopes to tool access
+                                 (fail closed: a token with no tools:<name>
+                                 scopes is granted no tools)
 
 Process management:
       --max-processes <number>   Max concurrent bash processes per session (default: 20)
@@ -222,7 +224,7 @@ platter -t http --auth jwks \
 
 **Discovery.** With `--oauth-issuer`, platter fetches the issuer's `/.well-known/openid-configuration` (falling back to `/.well-known/oauth-authorization-server`) at startup to find the `jwks_uri` and re-advertise the authorization server to RFC 9728-capable MCP clients (at `/.well-known/oauth-protected-resource/mcp`). Pass `--jwks-url` to skip discovery, or if the IdP isn't reachable at startup. If discovery fails but `--jwks-url` is set, token verification still works — only the RFC 9728 auto-advertisement is skipped.
 
-**Authorization (what a token can do).** By default a verified token gets admin-level access, bounded only by the operator's CLI restrictions (`--tools`, `--allow-path`, `--allow-command`, `--sandbox`) — the IdP controls *who* gets in, the CLI flags control *what* they can do. Pass `--jwks-scope-grants` to additionally honor `tools:<name>` scopes in the token (e.g. `tools:read tools:bash`), which further narrow the granted tools (they can only narrow, never widen the operator's ceiling). The `scope` claim and Entra-style `scp` claim are both supported. Tokens without any `tools:*` scope fall back to admin-level.
+**Authorization (what a token can do).** By default a verified token gets admin-level access, bounded only by the operator's CLI restrictions (`--tools`, `--allow-path`, `--allow-command`, `--sandbox`) — the IdP controls *who* gets in, the CLI flags control *what* they can do. Pass `--jwks-scope-grants` to additionally honor `tools:<name>` scopes in the token (e.g. `tools:read tools:bash`), which further narrow the granted tools (they can only narrow, never widen the operator's ceiling). The `scope` claim and Entra-style `scp` claim are both supported. In this mode access is **fail closed**: a token carrying no `tools:*` scope is granted no tools at all, so a token must explicitly request the tools it needs.
 
 **No static fallback.** Unlike `oauth` mode, `jwks` mode accepts *only* externally-issued JWTs — `--auth-token` is rejected.
 

@@ -1,5 +1,18 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
+
+/**
+ * Constant-time string equality for secrets (bearer tokens). Hashing both
+ * inputs to fixed-length SHA-256 digests first means `timingSafeEqual` never
+ * throws on a length mismatch and the comparison leaks neither the value nor
+ * the length of the expected secret.
+ */
+export function safeStrEqual(a: string, b: string): boolean {
+  const ha = createHash("sha256").update(a).digest();
+  const hb = createHash("sha256").update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
 
 export function killProcessTree(pid: number): void {
   try {
