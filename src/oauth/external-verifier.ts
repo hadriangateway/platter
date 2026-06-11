@@ -129,11 +129,13 @@ function parseScopes(payload: JWTPayload): string[] {
 }
 
 /**
- * Build a tools-only grant from `tools:<name>` scopes. Returns `null` when no
- * recognized tool scopes are present, which `buildSessionSecurity` treats as
- * admin-level (the operator's global CLI restrictions still apply).
+ * Build a tools-only grant from `tools:<name>` scopes. This is only invoked
+ * when scope-grants mode is enabled, so it always returns a grant (never null):
+ * a token with no recognized tool scopes yields an empty `{ tools: [] }` grant,
+ * which `buildSessionSecurity` intersects to zero tools — fail closed. A token
+ * must carry `tools:<name>` scopes to be granted any tool.
  */
-function scopesToGrant(scopes: string[]): ClientGrant | null {
+function scopesToGrant(scopes: string[]): ClientGrant {
   const valid = new Set<string>(ALL_TOOL_NAMES);
   const tools: ToolName[] = [];
   for (const s of scopes) {
@@ -141,7 +143,7 @@ function scopesToGrant(scopes: string[]): ClientGrant | null {
     const name = s.slice(TOOL_SCOPE_PREFIX.length);
     if (valid.has(name)) tools.push(name as ToolName);
   }
-  return tools.length > 0 ? { tools } : null;
+  return { tools };
 }
 
 function clientIdFromPayload(payload: JWTPayload): string {

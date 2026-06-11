@@ -32,6 +32,24 @@ function autoReturn(code: string): string {
   return lines.join("\n");
 }
 
+/**
+ * True for errors that must abort the evalAsync strategy cascade immediately
+ * instead of falling through to the next wrapping: a timeout (synchronous vm
+ * timeout or the Promise.race deadline) or an abort. Without this, a runaway
+ * synchronous loop would be retried under every wrapping, multiplying the
+ * timeout, and a cancellation would be ignored until the last attempt.
+ */
+function isFatalEvalError(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  const msg = e.message ?? "";
+  return (
+    (e as { code?: string }).code === "ERR_SCRIPT_EXECUTION_TIMEOUT" ||
+    msg.startsWith("Script execution timed out") ||
+    msg.startsWith("Execution timed out after") ||
+    msg === "Cancelled"
+  );
+}
+
 export class JsRuntime {
   private context: vm.Context;
   private logs: string[] = [];
@@ -168,7 +186,13 @@ export class JsRuntime {
 
   private async evalAsync(code: string, timeoutMs: number, signal?: AbortSignal): Promise<unknown> {
     const run = (wrapped: string): Promise<unknown> => {
-      const promise = vm.runInContext(wrapped, this.context) as Promise<unknown>;
+      // The `timeout` option only bounds the *synchronous* part of the IIFE
+      // (everything up to the first `await`), so a busy-loop before any await is
+      // interrupted here. A synchronous loop *after* an await runs as a
+      // microtask outside runInContext and still blocks the shared event loop —
+      // the Promise.race deadline below can't fire while the loop holds it. That
+      // residual is acceptable: `js` is explicitly not a security sandbox.
+      const promise = vm.runInContext(wrapped, this.context, { timeout: timeoutMs }) as Promise<unknown>;
       const racers: Promise<unknown>[] = [promise];
       racers.push(
         new Promise((_, reject) =>
@@ -188,14 +212,16 @@ export class JsRuntime {
     // Try as single async expression
     try {
       return await run(`(async()=>(\n${code}\n))()`);
-    } catch {
+    } catch (e) {
+      if (isFatalEvalError(e)) throw e;
       // Not a single expression
     }
 
     // Try as block with auto-return on last expression
     try {
       return await run(`(async()=>{\n${autoReturn(code)}\n})()`);
-    } catch {
+    } catch (e) {
+      if (isFatalEvalError(e)) throw e;
       // auto-return failed
     }
 
@@ -209,12 +235,14 @@ export class JsRuntime {
       if (tc === code) throw e;
       try {
         return await run(`(async()=>(\n${tc.replace(/;\s*$/, "")}\n))()`);
-      } catch {
+      } catch (err) {
+        if (isFatalEvalError(err)) throw err;
         /* not an expression */
       }
       try {
         return await run(`(async()=>{\n${autoReturn(tc)}\n})()`);
-      } catch {
+      } catch (err) {
+        if (isFatalEvalError(err)) throw err;
         /* auto-return failed */
       }
       return await run(`(async()=>{\n${tc}\n})()`);

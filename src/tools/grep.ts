@@ -10,7 +10,6 @@ export interface GrepArgs {
   pattern: string;
   path?: string;
   glob?: string;
-  include?: string;
   output_mode?: OutputMode;
   context?: number;
   before_context?: number;

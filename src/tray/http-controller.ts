@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { Server as HttpsServer, Server } from "node:http";
 import https from "node:https";
-import { resolve, sep } from "node:path";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import {
   getOAuthProtectedResourceMetadataUrl,
@@ -22,10 +21,12 @@ import { type GlobalRestrictions, installConsentRoutes, toolScope } from "../oau
 import { DualVerifier } from "../oauth/dual-verifier.js";
 import { ExternalJwtVerifier } from "../oauth/external-verifier.js";
 import type { ClientGrant, PlatterOAuthProvider } from "../oauth/provider.js";
+import { buildSessionSecurity } from "../oauth/session-security.js";
 import type { ProcessRegistry } from "../process-registry.js";
 import { ALL_TOOL_NAMES, isToolEnabled, type SecurityConfig, type ToolName } from "../security.js";
 import { type CreateServerOpts, createServer } from "../server.js";
 import type { JsRuntime } from "../tools/js.js";
+import { safeStrEqual } from "../utils.js";
 import type { ActivityMonitor } from "./activity-monitor.js";
 
 interface SessionEntry {
@@ -237,7 +238,7 @@ export class HttpController {
         (): GlobalRestrictions => ({
           enabledTools: ALL_TOOL_NAMES.filter((t) => isToolEnabled(security, t)),
           allowedPaths: security.allowedPaths,
-          allowedCommands: security.allowedCommands?.map((r) => r.source),
+          allowedCommands: security.allowedCommands?.flat().map((r) => r.source),
           sandbox: security.sandbox,
         }),
       );
@@ -317,12 +318,12 @@ export class HttpController {
           return;
         }
         const auth = req.headers.authorization;
-        if (!auth) {
+        if (!auth || typeof auth !== "string") {
           res.setHeader("WWW-Authenticate", "Bearer");
           res.status(401).json({ error: "Unauthorized" });
           return;
         }
-        if (auth !== `Bearer ${token}`) {
+        if (!safeStrEqual(auth, `Bearer ${token}`)) {
           res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token"');
           res.status(401).json({ error: "Unauthorized" });
           return;
@@ -500,82 +501,6 @@ export class HttpController {
     });
     await Promise.all(promises);
   }
-}
-
-/**
- * Narrow a global security config by a per-client grant. Grants can only
- * narrow (never widen), with one exception: if the global config doesn't
- * enable the sandbox, a grant CAN turn it on for that client.
- *
- * When `grant` is null (legacy bearer token), the global config is returned
- * as-is minus the `onToolsChanged` hook — runtime toggles reach per-session
- * tools via `broadcastToolToggle`, not via each session's own hook.
- */
-export function buildSessionSecurity(global: SecurityConfig, grant: ClientGrant | null): SecurityConfig {
-  if (!grant) {
-    const { onToolsChanged: _drop, ...rest } = global;
-    return { ...rest };
-  }
-
-  const sessionSecurity: SecurityConfig = {};
-
-  // Tools: intersection of global enabled and grant-requested.
-  const grantTools = new Set<ToolName>(grant.tools);
-  const globalTools = global.allowedTools ?? new Set<ToolName>(ALL_TOOL_NAMES);
-  const intersected = new Set<ToolName>();
-  for (const t of grantTools) {
-    if (globalTools.has(t)) intersected.add(t);
-  }
-  sessionSecurity.allowedTools = intersected;
-
-  // Paths: grant paths must be subpaths of at least one global allowed path
-  // (if the global config has a restriction). Otherwise the grant paths apply
-  // directly. Grant paths are resolved to absolute form.
-  if (grant.allowedPaths?.length) {
-    const grantResolved = grant.allowedPaths.map((p) => resolve(p));
-    if (global.allowedPaths?.length) {
-      const globalPaths = global.allowedPaths;
-      sessionSecurity.allowedPaths = grantResolved.filter((g) =>
-        globalPaths.some((allowed) => g === allowed || g.startsWith(allowed + sep)),
-      );
-    } else {
-      sessionSecurity.allowedPaths = grantResolved;
-    }
-  } else if (global.allowedPaths) {
-    sessionSecurity.allowedPaths = global.allowedPaths;
-  }
-
-  // Commands: grant regex strings compiled to anchored patterns. Assumed to
-  // already represent the admin's intent (they typed them on the consent
-  // page in response to the displayed global restriction). If the grant has
-  // none, fall back to the global config.
-  if (grant.allowedCommands?.length) {
-    sessionSecurity.allowedCommands = grant.allowedCommands.flatMap((pat) => {
-      try {
-        return [new RegExp(`^(?:${pat})$`)];
-      } catch {
-        return [];
-      }
-    });
-  } else if (global.allowedCommands) {
-    sessionSecurity.allowedCommands = global.allowedCommands;
-  }
-
-  // Sandbox: the global config wins whenever it's on (clients can't weaken).
-  // Otherwise, if the grant opts in, use the grant's sandbox config.
-  if (global.sandbox?.enabled) {
-    sessionSecurity.sandbox = global.sandbox;
-  } else if (grant.sandbox?.enabled) {
-    sessionSecurity.sandbox = {
-      enabled: true,
-      fsMode: grant.sandbox.fsMode,
-      allowedUrls: grant.sandbox.allowedUrls,
-    };
-  } else if (global.sandbox) {
-    sessionSecurity.sandbox = global.sandbox;
-  }
-
-  return sessionSecurity;
 }
 
 /**
