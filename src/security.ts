@@ -16,7 +16,14 @@ export interface SandboxConfig {
 export interface SecurityConfig {
   allowedTools?: Set<ToolName>;
   allowedPaths?: string[];
-  allowedCommands?: RegExp[];
+  /**
+   * Allowed bash commands, modelled as a conjunction of disjunctions: a list
+   * of pattern groups where a command must match at least one pattern in
+   * *every* group. The global `--allow-command` patterns form one group; a
+   * per-client OAuth grant adds another. Requiring all groups to match is what
+   * lets a grant only narrow (never widen) the global restriction.
+   */
+  allowedCommands?: RegExp[][];
   sandbox?: SandboxConfig;
   /**
    * Notified when allowedTools is mutated at runtime via setToolEnabled.
@@ -93,14 +100,23 @@ export async function validatePath(absolutePath: string, allowedPaths: string[])
 }
 
 /**
- * Validate that a bash command matches at least one allowed pattern.
- * Patterns are fully anchored — the entire command string must match.
+ * Validate a bash command against a conjunction of pattern groups: the command
+ * must match at least one pattern in *every* group. Each group is a disjunction
+ * (any pattern matches); the groups are ANDed together. Patterns are fully
+ * anchored — the entire command string must match.
+ *
+ * A single global group reproduces the old "match any allowed pattern"
+ * behaviour. A second group from a per-client grant can only narrow access,
+ * since a command now has to satisfy the global group as well.
+ *
+ * An empty `commandGroups` array is unrestricted: with no groups to satisfy,
+ * every command passes. To enforce any restriction, pass at least one group;
+ * to block everything, pass a group with no matching patterns.
  */
-export function validateCommand(command: string, allowedCommands: RegExp[]): void {
-  for (const pattern of allowedCommands) {
-    if (pattern.test(command)) {
-      return;
+export function validateCommand(command: string, commandGroups: RegExp[][]): void {
+  for (const group of commandGroups) {
+    if (!group.some((pattern) => pattern.test(command))) {
+      throw new Error("Command not allowed. Must match one of the allowed command patterns.");
     }
   }
-  throw new Error("Command not allowed. Must match one of the allowed command patterns.");
 }

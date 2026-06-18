@@ -93,6 +93,14 @@ describe("JsRuntime", () => {
     await expect(runtime.evaluate("while(true){}", 1000)).rejects.toThrow("timed out");
   });
 
+  it("times out on a sync loop before an await (async path)", async () => {
+    runtime = new JsRuntime();
+    // Contains `await`, so it takes the async evaluation path. The synchronous
+    // loop runs before the first await, so the vm timeout must interrupt it
+    // (and abort the wrapping cascade) rather than hang.
+    await expect(runtime.evaluate("while(true){}\nawait 1;", 1000)).rejects.toThrow("timed out");
+  });
+
   it("context survives after timeout", async () => {
     runtime = new JsRuntime();
     await runtime.evaluate("var before = 123");

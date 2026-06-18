@@ -122,10 +122,11 @@ describe("ExternalJwtVerifier", () => {
       expect(grant?.tools).toEqual(["read"]);
     });
 
-    it("falls back to admin (null grant) when no tools:<name> scopes are present", async () => {
+    it("fails closed (empty grant, no tools) when no tools:<name> scopes are present", async () => {
       const token = await sign({ audience: AUD, claims: { scope: "openid profile" } });
       const info = await makeVerifier({ scopeGrants: true }).verifyAccessToken(token);
-      expect((info.extra as { grant: unknown }).grant).toBeNull();
+      const grant = (info.extra as { grant: { tools: string[] } | null }).grant;
+      expect(grant).toEqual({ tools: [] });
     });
   });
 
