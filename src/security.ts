@@ -108,6 +108,10 @@ export async function validatePath(absolutePath: string, allowedPaths: string[])
  * A single global group reproduces the old "match any allowed pattern"
  * behaviour. A second group from a per-client grant can only narrow access,
  * since a command now has to satisfy the global group as well.
+ *
+ * An empty `commandGroups` array is unrestricted: with no groups to satisfy,
+ * every command passes. To enforce any restriction, pass at least one group;
+ * to block everything, pass a group with no matching patterns.
  */
 export function validateCommand(command: string, commandGroups: RegExp[][]): void {
   for (const group of commandGroups) {

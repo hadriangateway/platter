@@ -43,8 +43,16 @@ function isFatalEvalError(e: unknown): boolean {
   if (!(e instanceof Error)) return false;
   const msg = e.message ?? "";
   return (
+    // The error code is the reliable vm-timeout signal on Node and Bun. The
+    // message prefix below is a fallback for runtimes that don't set the code.
+    // If neither matches, the first two evalAsync attempts swallow the timeout
+    // and re-run the busy loop, but the third catch rethrows non-SyntaxErrors,
+    // so the worst case is bounded at 3x timeoutMs and the timeout still
+    // propagates (the sync busy-loop test in tests/js.test.ts checks that).
     (e as { code?: string }).code === "ERR_SCRIPT_EXECUTION_TIMEOUT" ||
     msg.startsWith("Script execution timed out") ||
+    // These two are platter's own messages: the Promise.race deadline in
+    // evalAsync and the abort-signal rejection. They are stable.
     msg.startsWith("Execution timed out after") ||
     msg === "Cancelled"
   );
