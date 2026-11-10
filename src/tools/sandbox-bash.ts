@@ -1,6 +1,19 @@
+import { open } from "node:fs/promises";
 import { Bash, type IFileSystem, InMemoryFs, MountableFs, type NetworkConfig, OverlayFs, ReadWriteFs } from "just-bash";
 import type { SandboxConfig } from "../security.js";
 import { formatSize, MAX_BYTES, resolveTimeout, truncateTail } from "../utils.js";
+
+// Bun 1.4+ creates a FinalizationRegistry the first time a FileHandle is
+// constructed. just-bash blocks that constructor while a script runs, so a
+// first open() from inside exec() fails and real files look missing. Opening
+// one handle up front lets Bun do that setup outside the sandbox.
+let fileHandlesReady: Promise<void> | undefined;
+function warmFileHandles(): Promise<void> {
+  fileHandlesReady ??= open(process.execPath, "r")
+    .then((handle) => handle.close())
+    .catch(() => {});
+  return fileHandlesReady;
+}
 
 function buildFilesystem(
   config: SandboxConfig,
@@ -93,6 +106,8 @@ export function createSandboxBash(
     } else {
       signal = timeoutSignal ?? opts?.signal;
     }
+
+    await warmFileHandles();
 
     let result: Awaited<ReturnType<typeof bash.exec>>;
     try {
