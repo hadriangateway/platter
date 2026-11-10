@@ -10,7 +10,7 @@ import { globTool } from "./tools/glob.js";
 import { grepTool } from "./tools/grep.js";
 import { JsRuntime } from "./tools/js.js";
 import { readTool } from "./tools/read.js";
-import { createSandboxBash } from "./tools/sandbox-bash.js";
+import { createSandboxBash, type SandboxBash } from "./tools/sandbox-bash.js";
 import { writeTool } from "./tools/write.js";
 import type { ActivityMonitor } from "./tray/activity-monitor.js";
 import { resolvePath, resolveTimeout } from "./utils.js";
@@ -31,6 +31,8 @@ export interface CreateServerResult {
   server: McpServer;
   registry: ProcessRegistry;
   runtime: JsRuntime | null;
+  /** Sandboxed bash runner when the sandbox is enabled; its running commands are aborted on shutdown. */
+  sandboxBash: SandboxBash | null;
   /**
    * Handles for every registered tool. Tools not currently allowed by
    * `security.allowedTools` are registered in a disabled state so the tray
@@ -57,6 +59,7 @@ export function createServer(cwd: string, security: SecurityConfig = {}, opts?: 
 
   const registry = new ProcessRegistry({ maxConcurrent: opts?.maxProcesses ?? 20 });
   const registeredTools = new Map<ToolName, RegisteredTool>();
+  let sandboxBash: SandboxBash | null = null;
   const activity = opts?.activity;
   const sessionId = opts?.sessionId ?? null;
 
@@ -209,104 +212,95 @@ export function createServer(cwd: string, security: SecurityConfig = {}, opts?: 
       effectiveDefault ? `default: ${effectiveDefault}` : "no default timeout",
       ...(bashMaxTimeout ? [`max: ${bashMaxTimeout}`] : []),
     ].join(", ");
-    const sandboxBashFn = sandboxEnabled
-      ? createSandboxBash(security.sandbox!, security.allowedPaths, cwd, bashTimeout, bashMaxTimeout)
+    sandboxBash = sandboxEnabled
+      ? createSandboxBash(security.sandbox!, security.allowedPaths, cwd, {
+          defaultTimeout: bashTimeout,
+          maxTimeout: bashMaxTimeout,
+          maxConcurrent: opts?.maxProcesses,
+        })
       : null;
 
-    const bashDescription = sandboxEnabled
-      ? "Execute a bash command in a sandboxed environment (just-bash). Returns stdout and stderr combined. Output is truncated to the last 2000 lines or 50KB. Optionally provide a timeout in seconds. Note: sandbox does not support native binaries — only bash builtins and just-bash built-in commands."
-      : `Execute a bash command, or manage a running process.
+    const bashDescription = `Execute a bash command${sandboxEnabled ? " in a sandboxed environment (just-bash)" : ""}, or manage a running one.
 
-Call in one of two modes — do not mix them:
-  1. Start a command: pass 'command' (and optional 'timeout'). Omit 'pid' and 'kill'.
-  2. Manage a running process: pass 'pid' (and optional 'kill'). Omit 'command'.
+Call in one of two modes; do not mix them:
+  1. Start a command: pass 'command' (and optional 'timeout' and 'warn'). Omit 'pid' and 'kill'.
+  2. Manage a running command: pass 'pid' (and optional 'warn', 'timeout' or 'kill'). Omit 'command'.
 
 Returns stdout/stderr combined, truncated to last 2000 lines or 50KB.
 
-${effectiveDefault ? `If the command hasn't finished within the timeout in seconds (${timeoutDefault})` : "If a timeout is set and the command hasn't finished"}, partial output is returned with the process pid.
-Use bash({ pid }) to wait for more output, or bash({ pid, kill: true }) to terminate it.`;
+${
+  effectiveDefault
+    ? `A command that is still running when its timeout expires is killed (${timeoutDefault}, in seconds). Raise 'timeout' for commands expected to run long.`
+    : "If 'timeout' is set, a command that is still running when it expires is killed."
+}
+Set 'warn' to get control back sooner: if the command is still running after that many seconds, the call returns ${sandboxEnabled ? "its pid" : "the output so far and its pid"}, and the command keeps running.
+Use bash({ pid }) to wait again, or bash({ pid, kill: true }) to terminate it.${
+      sandboxEnabled
+        ? "\n\nThe sandbox does not support native binaries, only bash builtins and just-bash built-in commands. Output is only available once a command finishes."
+        : ""
+    }`;
 
     const destructiveHint = sandboxEnabled ? security.sandbox!.fsMode === "readwrite" : true;
 
-    let handle: RegisteredTool;
-    if (sandboxEnabled) {
-      handle = server.registerTool(
-        "bash",
-        {
-          title: "Bash",
-          description: bashDescription,
-          inputSchema: {
-            command: z.string().describe("Bash command to execute"),
-            timeout: z.number().optional().describe(`Timeout in seconds (optional, ${timeoutDefault})`),
-          },
-          annotations: {
-            readOnlyHint: false,
-            destructiveHint,
-          },
+    const handle = server.registerTool(
+      "bash",
+      {
+        title: "Bash",
+        description: bashDescription,
+        inputSchema: {
+          command: z
+            .string()
+            .optional()
+            .describe(
+              "Bash command to execute. Provide this to start a new process; omit when managing an existing one via 'pid'.",
+            ),
+          pid: z
+            .number()
+            .optional()
+            .describe(
+              "PID of a running process to reattach to or kill. Omit (do not pass 0) when starting a new command via 'command'.",
+            ),
+          timeout: z
+            .number()
+            .optional()
+            .describe(
+              `Seconds the command may run before it is killed (${timeoutDefault}). With 'pid', sets a new limit counted from now.`,
+            ),
+          warn: z
+            .number()
+            .optional()
+            .describe(
+              "Seconds to wait before returning early. If the command is still running by then, the call returns with its pid and the command keeps running. Omit to wait until it finishes or times out.",
+            ),
+          kill: z
+            .boolean()
+            .optional()
+            .describe(
+              "Kill the process specified by 'pid'. Only valid together with 'pid'; omit when starting a new command.",
+            ),
         },
-        withActivity("bash", async (args, extra) => {
-          try {
-            checkCommand(args.command);
-            const result = await sandboxBashFn!(args, cwd, { signal: extra.signal });
-            return { content: [{ type: "text", text: result }] };
-          } catch (err: any) {
-            return { content: [{ type: "text", text: err.message }], isError: true };
-          }
-        }),
-      );
-    } else {
-      handle = server.registerTool(
-        "bash",
-        {
-          title: "Bash",
-          description: bashDescription,
-          inputSchema: {
-            command: z
-              .string()
-              .optional()
-              .describe(
-                "Bash command to execute. Provide this to start a new process; omit when managing an existing one via 'pid'.",
-              ),
-            pid: z
-              .number()
-              .optional()
-              .describe(
-                "PID of a running process to reattach to or kill. Omit (do not pass 0) when starting a new command via 'command'.",
-              ),
-            timeout: z
-              .number()
-              .optional()
-              .describe(
-                `Timeout in seconds (${timeoutDefault}). If the command hasn't finished by then, partial output is returned with the process pid.`,
-              ),
-            kill: z
-              .boolean()
-              .optional()
-              .describe(
-                "Kill the process specified by 'pid'. Only valid together with 'pid'; omit when starting a new command.",
-              ),
-          },
-          annotations: {
-            readOnlyHint: false,
-            destructiveHint,
-          },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint,
         },
-        withActivity("bash", async (args, extra) => {
-          try {
-            if (args.command) checkCommand(args.command);
-            const result = await bashTool(args, cwd, {
-              registry,
-              signal: extra.signal,
-              defaultTimeout: bashTimeout,
-              maxTimeout: bashMaxTimeout,
-            });
-            return { content: [{ type: "text", text: result }] };
-          } catch (err: any) {
-            return { content: [{ type: "text", text: err.message }], isError: true };
-          }
-        }),
-      );
-    }
+      },
+      withActivity("bash", async (args, extra) => {
+        try {
+          if (args.command) checkCommand(args.command);
+          const result = sandboxBash
+            ? await sandboxBash(args, cwd, { signal: extra.signal })
+            : await bashTool(args, cwd, {
+                registry,
+                signal: extra.signal,
+                defaultTimeout: bashTimeout,
+                maxTimeout: bashMaxTimeout,
+              });
+          return { content: [{ type: "text", text: result }] };
+        } catch (err: any) {
+          return { content: [{ type: "text", text: err.message }], isError: true };
+        }
+      }),
+    );
     register("bash", handle);
   }
 
@@ -424,5 +418,5 @@ Use bash({ pid }) to wait for more output, or bash({ pid, kill: true }) to termi
     register("js", handle);
   }
 
-  return { server, registry, runtime, registeredTools };
+  return { server, registry, runtime, sandboxBash, registeredTools };
 }

@@ -35,23 +35,69 @@ describe("sandbox-bash (memory mode)", () => {
   });
 });
 
-describe("sandbox-bash (default timeout)", () => {
+describe("sandbox-bash (timeout and warn)", () => {
   it("applies the default timeout when none is given", async () => {
-    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp", 0.2);
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp", { defaultTimeout: 0.2 });
     await expect(bash({ command: "sleep 5" }, "/tmp")).rejects.toThrow("timed out after 0.2 seconds");
   });
 
   it("explicit timeout overrides the default", async () => {
-    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp", 0.1);
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp", { defaultTimeout: 0.1 });
     const result = await bash({ command: "sleep 0.5; echo done", timeout: 5 }, "/tmp");
     expect(result).toContain("done");
   });
-});
 
-describe("sandbox-bash (max timeout)", () => {
   it("caps an explicit timeout at the maximum", async () => {
-    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp", undefined, 0.2);
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp", { maxTimeout: 0.2 });
     await expect(bash({ command: "sleep 5", timeout: 60 }, "/tmp")).rejects.toThrow("timed out after 0.2 seconds");
+  });
+
+  it("does not kill at once when the timeout is very large", async () => {
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp");
+    const result = await bash({ command: "sleep 0.3; echo done", timeout: 1e12 }, "/tmp");
+    expect(result).toContain("done");
+  });
+
+  it("warn returns early and the command can be reattached", async () => {
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp");
+    const result1 = await bash({ command: "sleep 0.6; echo done", warn: 0.2 }, "/tmp");
+    expect(result1).toContain("Process still running");
+    const pid = parseInt(result1.match(/pid: (\d+)/)![1], 10);
+    const result2 = await bash({ pid }, "/tmp");
+    expect(result2).toContain("done");
+  });
+
+  it("kills at the timeout after a warn return", async () => {
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp");
+    const result1 = await bash({ command: "sleep 5", warn: 0.1, timeout: 0.4 }, "/tmp");
+    const pid = parseInt(result1.match(/pid: (\d+)/)![1], 10);
+    await expect(bash({ pid }, "/tmp")).rejects.toThrow("timed out after 0.4 seconds");
+  });
+
+  it("runs other commands while one is still running", async () => {
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp");
+    const result1 = await bash({ command: "sleep 0.5; echo slow", warn: 0.1 }, "/tmp");
+    const pid = parseInt(result1.match(/pid: (\d+)/)![1], 10);
+    expect(await bash({ command: "echo fast" }, "/tmp")).toContain("fast");
+    expect(await bash({ pid }, "/tmp")).toContain("slow");
+  });
+
+  it("killAll aborts running commands", async () => {
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp");
+    const result1 = await bash({ command: "sleep 5", warn: 0.1 }, "/tmp");
+    const pid = parseInt(result1.match(/pid: (\d+)/)![1], 10);
+    const waiting = bash({ pid }, "/tmp");
+    await bash.killAll();
+    await expect(waiting).rejects.toThrow("Process was killed");
+  });
+
+  it("kills a running command by pid", async () => {
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp");
+    const result1 = await bash({ command: "sleep 5", warn: 0.1 }, "/tmp");
+    const pid = parseInt(result1.match(/pid: (\d+)/)![1], 10);
+    const result2 = await bash({ pid, kill: true }, "/tmp");
+    expect(result2).toContain(`Process ${pid} terminated.`);
+    await expect(bash({ pid }, "/tmp")).rejects.toThrow("No tracked process");
   });
 });
 

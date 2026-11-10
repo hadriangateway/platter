@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { ProcessRegistry, WaitResult } from "../process-registry.js";
-import { formatSize, killProcessTree, MAX_BYTES, resolveTimeout, truncateTail } from "../utils.js";
+import { formatSize, killProcessTree, MAX_BYTES, resolveTimeout, timerMs, truncateTail } from "../utils.js";
 
 function getShellConfig(): { shell: string; args: string[] } {
   const shell = process.env.SHELL || "/bin/bash";
@@ -12,15 +12,16 @@ export interface BashArgs {
   command?: string;
   pid?: number;
   timeout?: number;
+  warn?: number;
   kill?: boolean;
 }
 
 export interface BashOpts {
   registry?: ProcessRegistry;
   signal?: AbortSignal;
-  /** Timeout in seconds applied when the call does not specify one. */
+  /** Timeout in seconds applied when a new command does not specify one. */
   defaultTimeout?: number;
-  /** Upper bound in seconds on any timeout, including one the call specifies. */
+  /** Upper bound in seconds on how long a command may run, whatever the call asks for. */
   maxTimeout?: number;
 }
 
@@ -42,8 +43,7 @@ function formatCompletedOutput(result: WaitResult): string {
   return outputText;
 }
 
-export async function bashTool(args: BashArgs, cwd: string, opts?: BashOpts): Promise<string> {
-  // Validation
+export function validateBashArgs(args: BashArgs): { hasPid: boolean } {
   const hasCommand = args.command !== undefined && args.command !== "";
   const hasPid = args.pid !== undefined && args.pid > 0;
 
@@ -56,9 +56,16 @@ export async function bashTool(args: BashArgs, cwd: string, opts?: BashOpts): Pr
   if (args.kill && !hasPid) {
     throw new Error("'kill' requires 'pid'.");
   }
+  return { hasPid };
+}
 
-  const timeout = resolveTimeout(args.timeout, opts?.defaultTimeout, opts?.maxTimeout);
-  const timeoutMs = timeout !== undefined ? timeout * 1000 : undefined;
+export function stillRunningNotice(pid: number, elapsedMs: number): string {
+  return `[Process still running (pid: ${pid}, elapsed: ${formatElapsed(elapsedMs)}). Call bash with pid to continue waiting, or with pid + kill to terminate.]`;
+}
+
+export async function bashTool(args: BashArgs, cwd: string, opts?: BashOpts): Promise<string> {
+  const { hasPid } = validateBashArgs(args);
+  const warnMs = args.warn !== undefined && args.warn > 0 ? timerMs(args.warn) : undefined;
 
   // Kill mode
   if (hasPid && args.kill) {
@@ -79,9 +86,14 @@ export async function bashTool(args: BashArgs, cwd: string, opts?: BashOpts): Pr
   // Reattach mode
   if (hasPid) {
     if (!opts?.registry) throw new Error("Process management requires a registry.");
-    const result = await opts.registry.waitForOutput(args.pid!, timeoutMs, opts.signal);
+    if (args.timeout !== undefined && args.timeout > 0) {
+      opts.registry.setDeadline(args.pid!, args.timeout, opts.maxTimeout);
+    }
+    const result = await opts.registry.waitForOutput(args.pid!, warnMs, opts.signal);
     return formatWaitResult(result);
   }
+
+  const timeout = resolveTimeout(args.timeout, opts?.defaultTimeout, opts?.maxTimeout);
 
   // Spawn mode — no registry: use legacy blocking behavior
   if (!opts?.registry) {
@@ -102,13 +114,14 @@ export async function bashTool(args: BashArgs, cwd: string, opts?: BashOpts): Pr
   });
 
   const pid = opts.registry.register(child, args.command!);
-  const result = await opts.registry.waitForOutput(pid, timeoutMs, opts.signal);
+  if (timeout !== undefined) opts.registry.setDeadline(pid, timeout);
+  const result = await opts.registry.waitForOutput(pid, warnMs, opts.signal);
   return formatWaitResult(result);
 }
 
 function formatWaitResult(result: WaitResult): string {
   if (!result.done) {
-    // Soft timeout — return partial output with continuation hint
+    // Warn threshold passed: return partial output with continuation hint
     const truncation = truncateTail(result.output);
     let outputText = truncation.content || "";
     if (truncation.truncated) {
@@ -117,12 +130,15 @@ function formatWaitResult(result: WaitResult): string {
       outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(MAX_BYTES)} limit)]`;
     }
     if (outputText) outputText += "\n\n";
-    outputText += `[Process still running (pid: ${result.pid}, elapsed: ${formatElapsed(result.elapsed)}). Call bash with pid to continue waiting, or with pid + kill to terminate.]`;
+    outputText += stillRunningNotice(result.pid, result.elapsed);
     return outputText;
   }
 
   const outputText = formatCompletedOutput(result);
 
+  if (result.timedOutAfter !== undefined) {
+    throw new Error(`${outputText}\n\nCommand timed out after ${result.timedOutAfter} seconds`);
+  }
   if (result.exitSignal) {
     throw new Error(`Process was killed by ${result.exitSignal}\n\n${outputText}`);
   }
@@ -155,7 +171,7 @@ function legacySpawn(args: { command: string; timeout?: number }, cwd: string): 
       timeoutHandle = setTimeout(() => {
         timedOut = true;
         if (child.pid) killProcessTree(child.pid);
-      }, args.timeout * 1000);
+      }, timerMs(args.timeout));
     }
 
     const chunks: Buffer[] = [];

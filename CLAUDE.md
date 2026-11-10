@@ -33,7 +33,7 @@ bun test tests/edit.test.ts  # run a single test file
 
 **Config:** `src/config.ts` — Persists settings to `~/.config/platter/config.json`.
 
-**Process registry:** `src/process-registry.ts` — Tracks child processes with soft timeouts, output buffering, reattachment support, and automatic stale process cleanup.
+**Process registry:** `src/process-registry.ts` — Tracks child processes with kill deadlines, early (warn) returns, output buffering, reattachment support, and automatic stale process cleanup.
 
 **Tools** (`src/tools/`): Each tool has its own file. `sandbox-bash.ts` is an alternative bash implementation using `just-bash` (TypeScript bash reimplementation with virtual FS).
 

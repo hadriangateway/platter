@@ -26,6 +26,7 @@ import type { ProcessRegistry } from "../process-registry.js";
 import { ALL_TOOL_NAMES, isToolEnabled, type SecurityConfig, type ToolName } from "../security.js";
 import { type CreateServerOpts, createServer } from "../server.js";
 import type { JsRuntime } from "../tools/js.js";
+import type { SandboxBash } from "../tools/sandbox-bash.js";
 import { safeStrEqual } from "../utils.js";
 import type { ActivityMonitor } from "./activity-monitor.js";
 
@@ -33,6 +34,7 @@ interface SessionEntry {
   server: McpServer;
   registry: ProcessRegistry;
   runtime: JsRuntime | null;
+  sandboxBash: SandboxBash | null;
   registeredTools: Map<ToolName, RegisteredTool>;
   transport: StreamableHTTPServerTransport;
   lastAccessed: number;
@@ -375,6 +377,7 @@ export class HttpController {
             server: created.server,
             registry: created.registry,
             runtime: created.runtime,
+            sandboxBash: created.sandboxBash,
             registeredTools: created.registeredTools,
             transport,
             lastAccessed: Date.now(),
@@ -482,6 +485,7 @@ export class HttpController {
     if (!session) return;
     this.sessions.delete(id);
     if (session.runtime) session.runtime.dispose();
+    void session.sandboxBash?.killAll();
     session.registry.killAll().then(() => session.registry.dispose());
     session.transport.close?.();
     this.opts.activity?.sessionDestroyed(id);
@@ -494,6 +498,7 @@ export class HttpController {
       this.sessions.delete(id);
       if (session.runtime) session.runtime.dispose();
       this.opts.activity?.sessionDestroyed(id);
+      void session.sandboxBash?.killAll();
       return session.registry.killAll().then(() => {
         session.registry.dispose();
         session.transport.close?.();

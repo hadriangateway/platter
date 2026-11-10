@@ -95,3 +95,13 @@ export function resolveTimeout(requested?: number, defaultTimeout?: number, maxT
   if (max === undefined) return timeout;
   return timeout === undefined ? max : Math.min(timeout, max);
 }
+
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/**
+ * Convert seconds to a setTimeout delay. setTimeout fires almost immediately
+ * when given more than MAX_TIMER_MS, so a very large value is clamped to it.
+ */
+export function timerMs(seconds: number): number {
+  return Math.min(seconds * 1000, MAX_TIMER_MS);
+}

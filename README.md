@@ -17,7 +17,7 @@ Designed to be used by browser-based (or any MCP-compatible) agents, like [Hadri
 | **read** | Read file contents with pagination (offset/limit). Detects image files (JPEG, PNG, GIF, WebP) and returns metadata. Truncates text to 2000 lines or 50KB. |
 | **write** | Create or overwrite files. Auto-creates parent directories. |
 | **edit** | Find-and-replace with exact or fuzzy matching (normalizes smart quotes, dashes, and Unicode whitespace). Requires a unique match, or use `replace_all` for every occurrence (exact matches only). Returns a unified diff. |
-| **bash** | Execute shell commands with optional timeout. Output truncated to last 2000 lines or 50KB. |
+| **bash** | Execute shell commands. Commands are killed at a timeout, and an optional `warn` returns control early while the command keeps running. Output truncated to last 2000 lines or 50KB. |
 | **glob** | Fast file pattern matching. Returns up to 500 paths matching a glob pattern (e.g. `**/*.ts`). |
 | **grep** | Search file contents using [ripgrep](https://github.com/BurntSushi/ripgrep). Supports regex, file filtering, context lines, and multiple output modes. Requires `rg` to be installed. |
 | **js** | Evaluate JavaScript/TypeScript in a persistent Node.js `vm` context. State persists across calls within a session. Supports `await`, `console.log`, and loading packages from unpkg.com via `await load("package")`. Auto-returns the last expression. **Not a security sandbox** — see [Security](#security) below. |
@@ -89,11 +89,11 @@ External JWKS / OIDC (--auth jwks — verify tokens from an external IdP):
 Process management:
       --max-processes <number>   Max concurrent bash processes per session (default: 20)
       --max-sessions <number>    Max concurrent HTTP sessions (default: unlimited)
-      --bash-timeout <seconds>   Default timeout for bash calls that do not set one
-                                 (default: 120)
+      --bash-timeout <seconds>   Kill bash commands that run longer than this, unless
+                                 the tool call sets its own timeout (default: 120)
       --bash-max-timeout <seconds>
-                                 Upper limit on any bash timeout, including one
-                                 requested in a tool call (default: none)
+                                 Upper limit on how long a bash command may run,
+                                 whatever the tool call asks for (default: none)
 
 Restrictions:
       --tools <list>             Comma-separated tools to enable (default: all)
@@ -161,16 +161,21 @@ Active restrictions are logged to stderr at startup.
 
 ### Bash timeout
 
-Two flags bound how long a bash call can wait, both in seconds:
+A bash command that is still running when its timeout expires is killed, and the call returns an error with the output so far. This works the same way with native bash and with `--sandbox`. Two flags set the limits, both in seconds:
 
-- `--bash-timeout` (default: 120) applies to calls that do not pass a `timeout` argument.
-- `--bash-max-timeout` (default: no limit) is an optional upper limit. A larger `timeout` requested in a tool call is reduced to this value, and so is `--bash-timeout` if it is set higher.
+- `--bash-timeout` (default: 120) applies to commands started without a `timeout` argument.
+- `--bash-max-timeout` (default: no limit) is an optional upper limit on how long a command may run. A larger `timeout` requested in a tool call is reduced to this value, and so is `--bash-timeout` if it is set higher.
 
 ```bash
 platter --bash-timeout 30 --bash-max-timeout 300
 ```
 
-With native bash, a command that is still running when the timeout expires is left running. The call returns the partial output and the process pid, and the agent can wait again or kill it. With `--sandbox`, the command is aborted. A `timeout` passed in the tool call takes precedence over the default, up to the limit.
+The agent controls two arguments per call:
+
+- `timeout` replaces the default for that command, up to the limit.
+- `warn` returns control early. If the command is still running after `warn` seconds, the call returns its pid and the command keeps running until it finishes or reaches its timeout. The agent can call again with the pid to keep waiting, pass a new `timeout` to set a new limit counted from that call, or kill the command.
+
+With native bash a `warn` return includes the output so far. In sandbox mode output is only available once the command finishes.
 
 ### Authentication
 

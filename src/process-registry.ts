@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import { killProcessTree, MAX_BYTES } from "./utils.js";
+import { killProcessTree, MAX_BYTES, timerMs } from "./utils.js";
 
 const MAX_BUFFER_BYTES = 2 * MAX_BYTES; // 100KB buffer cap
 
@@ -18,6 +18,8 @@ interface TrackedProcess {
   currentBufferBytes: number;
   lastReadOffset: number;
   completionPromise: Promise<void>;
+  deadline?: NodeJS.Timeout;
+  timedOutAfter?: number;
 }
 
 export interface WaitResult {
@@ -27,6 +29,8 @@ export interface WaitResult {
   exitCode?: number | null;
   exitSignal?: string | null;
   elapsed: number;
+  /** Set when the process was killed by its deadline; seconds it was allowed to run. */
+  timedOutAfter?: number;
 }
 
 const STALE_KEEP_MS = 5 * 60 * 1000;
@@ -105,6 +109,7 @@ export class ProcessRegistry {
     child.stderr?.on("data", collectOutput);
 
     child.on("close", (code, signal) => {
+      clearTimeout(tracked.deadline);
       if (tracked.state === "running") {
         tracked.state = "completed";
         this._runningCount--;
@@ -166,6 +171,35 @@ export class ProcessRegistry {
     return this.buildResult(tracked);
   }
 
+  /**
+   * Kill the process `seconds` from now, replacing any earlier deadline. With
+   * `maxLifetimeSeconds`, the deadline never falls later than that long after
+   * the process started.
+   */
+  setDeadline(pid: number, seconds: number, maxLifetimeSeconds?: number): void {
+    const tracked = this.processes.get(pid);
+    if (!tracked) {
+      throw new Error(`No tracked process with pid ${pid}`);
+    }
+    if (tracked.state !== "running") return;
+
+    const elapsed = (Date.now() - tracked.startedAt) / 1000;
+    let remaining = seconds;
+    if (maxLifetimeSeconds !== undefined && maxLifetimeSeconds > 0) {
+      remaining = Math.min(remaining, Math.max(0, maxLifetimeSeconds - elapsed));
+    }
+    const delay = timerMs(remaining);
+    const lifetime = Math.round((elapsed + delay / 1000) * 10) / 10;
+
+    clearTimeout(tracked.deadline);
+    tracked.deadline = setTimeout(() => {
+      if (tracked.state !== "running") return;
+      tracked.timedOutAfter = lifetime;
+      void this.kill(pid);
+    }, delay);
+    tracked.deadline.unref();
+  }
+
   readNewOutput(pid: number): string {
     const tracked = this.processes.get(pid);
     if (!tracked) {
@@ -184,6 +218,7 @@ export class ProcessRegistry {
 
     tracked.state = "killed";
     this._runningCount--;
+    clearTimeout(tracked.deadline);
     killProcessTree(pid);
 
     const fallback = setTimeout(() => {
@@ -224,6 +259,7 @@ export class ProcessRegistry {
       exitCode: tracked.exitCode,
       exitSignal: tracked.exitSignal,
       elapsed: Date.now() - tracked.startedAt,
+      timedOutAfter: tracked.timedOutAfter,
     };
   }
 

@@ -47,11 +47,11 @@ External JWKS / OIDC (--auth jwks — verify tokens from an external IdP):
 Process management:
       --max-processes <number>   Max concurrent bash processes per session (default: 20)
       --max-sessions <number>    Max concurrent HTTP sessions (default: unlimited)
-      --bash-timeout <seconds>   Default timeout for bash calls that do not set one
-                                 (default: 120)
+      --bash-timeout <seconds>   Kill bash commands that run longer than this, unless
+                                 the tool call sets its own timeout (default: 120)
       --bash-max-timeout <seconds>
-                                 Upper limit on any bash timeout, including one
-                                 requested in a tool call (default: none)
+                                 Upper limit on how long a bash command may run,
+                                 whatever the tool call asks for (default: none)
 
 Restrictions:
       --tools <list>             Comma-separated tools to enable (default: all)

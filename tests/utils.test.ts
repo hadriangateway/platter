@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { formatSize, resolvePath, resolveTimeout } from "../src/utils.js";
+import { formatSize, resolvePath, resolveTimeout, timerMs } from "../src/utils.js";
 
 describe("resolvePath", () => {
   it("returns absolute paths as-is", () => {
@@ -51,5 +51,15 @@ describe("resolveTimeout", () => {
   it("returns undefined when nothing applies", () => {
     expect(resolveTimeout()).toBeUndefined();
     expect(resolveTimeout(0)).toBeUndefined();
+  });
+});
+
+describe("timerMs", () => {
+  it("converts seconds to milliseconds", () => {
+    expect(timerMs(1.5)).toBe(1500);
+  });
+
+  it("clamps values setTimeout cannot represent", () => {
+    expect(timerMs(1e12)).toBe(2 ** 31 - 1);
   });
 });
