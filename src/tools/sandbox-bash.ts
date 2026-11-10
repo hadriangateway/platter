@@ -1,6 +1,6 @@
 import { Bash, type IFileSystem, InMemoryFs, MountableFs, type NetworkConfig, OverlayFs, ReadWriteFs } from "just-bash";
 import type { SandboxConfig } from "../security.js";
-import { formatSize, MAX_BYTES, truncateTail } from "../utils.js";
+import { formatSize, MAX_BYTES, resolveTimeout, truncateTail } from "../utils.js";
 
 function buildFilesystem(
   config: SandboxConfig,
@@ -69,6 +69,8 @@ export function createSandboxBash(
   config: SandboxConfig,
   allowedPaths: string[] | undefined,
   cwd: string,
+  defaultTimeout?: number,
+  maxTimeout?: number,
 ): (args: { command: string; timeout?: number }, execCwd: string, opts?: { signal?: AbortSignal }) => Promise<string> {
   const { fs, cwd: virtualCwd } = buildFilesystem(config, allowedPaths, cwd);
   const network = buildNetwork(config);
@@ -80,7 +82,8 @@ export function createSandboxBash(
   });
 
   return async (args, _execCwd, opts?) => {
-    const timeoutMs = args.timeout !== undefined && args.timeout > 0 ? args.timeout * 1000 : undefined;
+    const timeout = resolveTimeout(args.timeout, defaultTimeout, maxTimeout);
+    const timeoutMs = timeout !== undefined ? timeout * 1000 : undefined;
     const timeoutSignal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
 
     // Combine MCP cancellation signal with timeout signal
@@ -99,7 +102,7 @@ export function createSandboxBash(
         throw new Error("Cancelled");
       }
       if (err.name === "TimeoutError" || timeoutSignal?.aborted) {
-        throw new Error(`Command timed out after ${args.timeout} seconds`);
+        throw new Error(`Command timed out after ${timeout} seconds`);
       }
       throw err;
     }
@@ -113,7 +116,7 @@ export function createSandboxBash(
     if (timeoutSignal?.aborted) {
       let output = result.stdout + (result.stderr ? (result.stdout ? "\n" : "") + result.stderr : "");
       if (output) output += "\n\n";
-      output += `Command timed out after ${args.timeout} seconds`;
+      output += `Command timed out after ${timeout} seconds`;
       throw new Error(output);
     }
 

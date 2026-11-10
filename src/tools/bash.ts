@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { ProcessRegistry, WaitResult } from "../process-registry.js";
-import { formatSize, killProcessTree, MAX_BYTES, truncateTail } from "../utils.js";
+import { formatSize, killProcessTree, MAX_BYTES, resolveTimeout, truncateTail } from "../utils.js";
 
 function getShellConfig(): { shell: string; args: string[] } {
   const shell = process.env.SHELL || "/bin/bash";
@@ -18,6 +18,10 @@ export interface BashArgs {
 export interface BashOpts {
   registry?: ProcessRegistry;
   signal?: AbortSignal;
+  /** Timeout in seconds applied when the call does not specify one. */
+  defaultTimeout?: number;
+  /** Upper bound in seconds on any timeout, including one the call specifies. */
+  maxTimeout?: number;
 }
 
 function formatElapsed(ms: number): string {
@@ -53,6 +57,9 @@ export async function bashTool(args: BashArgs, cwd: string, opts?: BashOpts): Pr
     throw new Error("'kill' requires 'pid'.");
   }
 
+  const timeout = resolveTimeout(args.timeout, opts?.defaultTimeout, opts?.maxTimeout);
+  const timeoutMs = timeout !== undefined ? timeout * 1000 : undefined;
+
   // Kill mode
   if (hasPid && args.kill) {
     if (!opts?.registry) throw new Error("Process management requires a registry.");
@@ -72,14 +79,13 @@ export async function bashTool(args: BashArgs, cwd: string, opts?: BashOpts): Pr
   // Reattach mode
   if (hasPid) {
     if (!opts?.registry) throw new Error("Process management requires a registry.");
-    const timeoutMs = args.timeout ? args.timeout * 1000 : undefined;
     const result = await opts.registry.waitForOutput(args.pid!, timeoutMs, opts.signal);
     return formatWaitResult(result);
   }
 
   // Spawn mode — no registry: use legacy blocking behavior
   if (!opts?.registry) {
-    return legacySpawn({ command: args.command!, timeout: args.timeout }, cwd);
+    return legacySpawn({ command: args.command!, timeout }, cwd);
   }
 
   // Spawn mode — with registry
@@ -95,7 +101,6 @@ export async function bashTool(args: BashArgs, cwd: string, opts?: BashOpts): Pr
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  const timeoutMs = args.timeout ? args.timeout * 1000 : undefined;
   const pid = opts.registry.register(child, args.command!);
   const result = await opts.registry.waitForOutput(pid, timeoutMs, opts.signal);
   return formatWaitResult(result);

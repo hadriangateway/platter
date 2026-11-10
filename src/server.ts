@@ -13,10 +13,14 @@ import { readTool } from "./tools/read.js";
 import { createSandboxBash } from "./tools/sandbox-bash.js";
 import { writeTool } from "./tools/write.js";
 import type { ActivityMonitor } from "./tray/activity-monitor.js";
-import { resolvePath } from "./utils.js";
+import { resolvePath, resolveTimeout } from "./utils.js";
 
 export interface CreateServerOpts {
   maxProcesses?: number;
+  /** Default bash timeout in seconds, used when a call does not specify one. */
+  bashTimeout?: number;
+  /** Upper bound in seconds on any bash timeout, including one a call specifies. */
+  bashMaxTimeout?: number;
   /** Optional sink for tool-invocation + session events. */
   activity?: ActivityMonitor;
   /** Session identifier recorded on each invocation when `activity` is set. */
@@ -198,7 +202,16 @@ export function createServer(cwd: string, security: SecurityConfig = {}, opts?: 
 
   {
     const sandboxEnabled = security.sandbox?.enabled === true;
-    const sandboxBashFn = sandboxEnabled ? createSandboxBash(security.sandbox!, security.allowedPaths, cwd) : null;
+    const bashTimeout = opts?.bashTimeout;
+    const bashMaxTimeout = opts?.bashMaxTimeout;
+    const effectiveDefault = resolveTimeout(undefined, bashTimeout, bashMaxTimeout);
+    const timeoutDefault = [
+      effectiveDefault ? `default: ${effectiveDefault}` : "no default timeout",
+      ...(bashMaxTimeout ? [`max: ${bashMaxTimeout}`] : []),
+    ].join(", ");
+    const sandboxBashFn = sandboxEnabled
+      ? createSandboxBash(security.sandbox!, security.allowedPaths, cwd, bashTimeout, bashMaxTimeout)
+      : null;
 
     const bashDescription = sandboxEnabled
       ? "Execute a bash command in a sandboxed environment (just-bash). Returns stdout and stderr combined. Output is truncated to the last 2000 lines or 50KB. Optionally provide a timeout in seconds. Note: sandbox does not support native binaries — only bash builtins and just-bash built-in commands."
@@ -210,7 +223,7 @@ Call in one of two modes — do not mix them:
 
 Returns stdout/stderr combined, truncated to last 2000 lines or 50KB.
 
-If a timeout is set and the command hasn't finished, partial output is returned with the process pid.
+${effectiveDefault ? `If the command hasn't finished within the timeout in seconds (${timeoutDefault})` : "If a timeout is set and the command hasn't finished"}, partial output is returned with the process pid.
 Use bash({ pid }) to wait for more output, or bash({ pid, kill: true }) to terminate it.`;
 
     const destructiveHint = sandboxEnabled ? security.sandbox!.fsMode === "readwrite" : true;
@@ -224,7 +237,7 @@ Use bash({ pid }) to wait for more output, or bash({ pid, kill: true }) to termi
           description: bashDescription,
           inputSchema: {
             command: z.string().describe("Bash command to execute"),
-            timeout: z.number().optional().describe("Timeout in seconds (optional, no default timeout)"),
+            timeout: z.number().optional().describe(`Timeout in seconds (optional, ${timeoutDefault})`),
           },
           annotations: {
             readOnlyHint: false,
@@ -264,7 +277,7 @@ Use bash({ pid }) to wait for more output, or bash({ pid, kill: true }) to termi
               .number()
               .optional()
               .describe(
-                "Timeout in seconds. If the command hasn't finished by then, partial output is returned with the process pid.",
+                `Timeout in seconds (${timeoutDefault}). If the command hasn't finished by then, partial output is returned with the process pid.`,
               ),
             kill: z
               .boolean()
@@ -284,6 +297,8 @@ Use bash({ pid }) to wait for more output, or bash({ pid, kill: true }) to termi
             const result = await bashTool(args, cwd, {
               registry,
               signal: extra.signal,
+              defaultTimeout: bashTimeout,
+              maxTimeout: bashMaxTimeout,
             });
             return { content: [{ type: "text", text: result }] };
           } catch (err: any) {

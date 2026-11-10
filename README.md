@@ -89,6 +89,11 @@ External JWKS / OIDC (--auth jwks — verify tokens from an external IdP):
 Process management:
       --max-processes <number>   Max concurrent bash processes per session (default: 20)
       --max-sessions <number>    Max concurrent HTTP sessions (default: unlimited)
+      --bash-timeout <seconds>   Default timeout for bash calls that do not set one
+                                 (default: 120)
+      --bash-max-timeout <seconds>
+                                 Upper limit on any bash timeout, including one
+                                 requested in a tool call (default: none)
 
 Restrictions:
       --tools <list>             Comma-separated tools to enable (default: all)
@@ -153,6 +158,19 @@ platter --allow-path ./my-project --allow-command "git( .*)?" --allow-command "n
 ```
 
 Active restrictions are logged to stderr at startup.
+
+### Bash timeout
+
+Two flags bound how long a bash call can wait, both in seconds:
+
+- `--bash-timeout` (default: 120) applies to calls that do not pass a `timeout` argument.
+- `--bash-max-timeout` (default: no limit) is an optional upper limit. A larger `timeout` requested in a tool call is reduced to this value, and so is `--bash-timeout` if it is set higher.
+
+```bash
+platter --bash-timeout 30 --bash-max-timeout 300
+```
+
+With native bash, a command that is still running when the timeout expires is left running. The call returns the partial output and the process pid, and the agent can wait again or kill it. With `--sandbox`, the command is aborted. A `timeout` passed in the tool call takes precedence over the default, up to the limit.
 
 ### Authentication
 

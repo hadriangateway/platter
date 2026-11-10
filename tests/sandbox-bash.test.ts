@@ -35,6 +35,26 @@ describe("sandbox-bash (memory mode)", () => {
   });
 });
 
+describe("sandbox-bash (default timeout)", () => {
+  it("applies the default timeout when none is given", async () => {
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp", 0.2);
+    await expect(bash({ command: "sleep 5" }, "/tmp")).rejects.toThrow("timed out after 0.2 seconds");
+  });
+
+  it("explicit timeout overrides the default", async () => {
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp", 0.1);
+    const result = await bash({ command: "sleep 0.5; echo done", timeout: 5 }, "/tmp");
+    expect(result).toContain("done");
+  });
+});
+
+describe("sandbox-bash (max timeout)", () => {
+  it("caps an explicit timeout at the maximum", async () => {
+    const bash = createSandboxBash({ enabled: true, fsMode: "memory" }, undefined, "/tmp", undefined, 0.2);
+    await expect(bash({ command: "sleep 5", timeout: 60 }, "/tmp")).rejects.toThrow("timed out after 0.2 seconds");
+  });
+});
+
 describe("sandbox-bash (readwrite mode)", () => {
   let dir: string;
 

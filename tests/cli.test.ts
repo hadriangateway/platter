@@ -57,6 +57,28 @@ describe("CLI", () => {
     expect(stderr).toContain("invalid transport");
   });
 
+  it("invalid --bash-timeout prints error and exits 1", async () => {
+    const proc = Bun.spawn(["bun", "run", "src/index.ts", "--bash-timeout", "abc"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    const stderr = await new Response(proc.stderr).text();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("invalid --bash-timeout");
+  });
+
+  it("invalid --bash-max-timeout prints error and exits 1", async () => {
+    const proc = Bun.spawn(["bun", "run", "src/index.ts", "--bash-max-timeout", "0"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    const stderr = await new Response(proc.stderr).text();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("invalid --bash-max-timeout");
+  });
+
   it("--auth jwks without issuer or jwks-url exits 1", async () => {
     const proc = Bun.spawn(["bun", "run", "src/index.ts", "--auth", "jwks"], {
       stdout: "pipe",

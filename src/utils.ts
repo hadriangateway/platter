@@ -82,3 +82,16 @@ export function truncateTail(content: string): {
     outputLines: outputLinesArr.length,
   };
 }
+
+/**
+ * Pick the timeout (in seconds) for a bash call: the requested value if
+ * positive, otherwise the default, capped at the maximum. Returns undefined
+ * when no timeout applies.
+ */
+export function resolveTimeout(requested?: number, defaultTimeout?: number, maxTimeout?: number): number | undefined {
+  const positive = (n?: number) => (n !== undefined && n > 0 ? n : undefined);
+  const timeout = positive(requested) ?? positive(defaultTimeout);
+  const max = positive(maxTimeout);
+  if (max === undefined) return timeout;
+  return timeout === undefined ? max : Math.min(timeout, max);
+}

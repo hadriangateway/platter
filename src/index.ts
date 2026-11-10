@@ -47,6 +47,11 @@ External JWKS / OIDC (--auth jwks — verify tokens from an external IdP):
 Process management:
       --max-processes <number>   Max concurrent bash processes per session (default: 20)
       --max-sessions <number>    Max concurrent HTTP sessions (default: unlimited)
+      --bash-timeout <seconds>   Default timeout for bash calls that do not set one
+                                 (default: 120)
+      --bash-max-timeout <seconds>
+                                 Upper limit on any bash timeout, including one
+                                 requested in a tool call (default: none)
 
 Restrictions:
       --tools <list>             Comma-separated tools to enable (default: all)
@@ -100,6 +105,8 @@ const { values } = parseArgs({
     "tls-key": { type: "string" },
     "max-processes": { type: "string", default: "20" },
     "max-sessions": { type: "string" },
+    "bash-timeout": { type: "string", default: "120" },
+    "bash-max-timeout": { type: "string" },
   },
 });
 
@@ -222,6 +229,25 @@ if (maxSessions !== undefined && (Number.isNaN(maxSessions) || maxSessions <= 0)
   process.exit(1);
 }
 
+const bashMaxTimeout = values["bash-max-timeout"] !== undefined ? Number(values["bash-max-timeout"]) : undefined;
+
+if (bashMaxTimeout !== undefined && (!Number.isFinite(bashMaxTimeout) || bashMaxTimeout <= 0)) {
+  console.error(
+    `Error: invalid --bash-max-timeout value "${values["bash-max-timeout"]}". Must be a positive number of seconds.\n`,
+  );
+  process.exit(1);
+}
+
+// The default never exceeds the cap, so lowering only --bash-max-timeout works.
+const bashTimeout = Math.min(Number(values["bash-timeout"]), bashMaxTimeout ?? Infinity);
+
+if (!Number.isFinite(bashTimeout) || bashTimeout <= 0) {
+  console.error(
+    `Error: invalid --bash-timeout value "${values["bash-timeout"]}". Must be a positive number of seconds.\n`,
+  );
+  process.exit(1);
+}
+
 // --- Security restrictions ---
 
 const security: SecurityConfig = {};
@@ -282,7 +308,7 @@ if (security.allowedPaths && bashEnabled && !security.allowedCommands && !securi
 }
 
 const cwd = values.cwd!;
-const serverOpts = { maxProcesses };
+const serverOpts = { maxProcesses, bashTimeout, bashMaxTimeout };
 
 function logRestrictions() {
   if (security.allowedTools) {
@@ -297,6 +323,7 @@ function logRestrictions() {
   if (maxSessions !== undefined) {
     console.error(`Max sessions: ${maxSessions}`);
   }
+  console.error(`Bash timeout: ${bashTimeout}s${bashMaxTimeout !== undefined ? ` (max: ${bashMaxTimeout}s)` : ""}`);
   if (security.sandbox?.enabled) {
     console.error(`Sandbox: enabled (fs: ${security.sandbox.fsMode})`);
     if (security.sandbox.allowedUrls) {

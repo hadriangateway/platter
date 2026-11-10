@@ -99,4 +99,36 @@ describe("bashTool with registry", () => {
     expect(result).toContain("fast");
     expect(result).not.toContain("Process still running");
   });
+
+  it("applies the default timeout when none is given", async () => {
+    const result = await bashTool({ command: "echo start && sleep 5" }, dir, { registry, defaultTimeout: 0.2 });
+    expect(result).toContain("start");
+    expect(result).toContain("Process still running");
+  });
+
+  it("applies the default timeout when reattaching", async () => {
+    const result1 = await bashTool({ command: "sleep 5" }, dir, { registry, defaultTimeout: 0.2 });
+    const pid = parseInt(result1.match(/pid: (\d+)/)![1], 10);
+    const result2 = await bashTool({ pid }, dir, { registry, defaultTimeout: 0.2 });
+    expect(result2).toContain("Process still running");
+  });
+
+  it("explicit timeout overrides the default", async () => {
+    const result = await bashTool({ command: "sleep 0.5 && echo done", timeout: 5 }, dir, {
+      registry,
+      defaultTimeout: 0.1,
+    });
+    expect(result).toContain("done");
+    expect(result).not.toContain("Process still running");
+  });
+
+  it("caps an explicit timeout at the maximum", async () => {
+    const result = await bashTool({ command: "sleep 5", timeout: 60 }, dir, { registry, maxTimeout: 0.2 });
+    expect(result).toContain("Process still running");
+  });
+
+  it("applies the maximum when no timeout or default is given", async () => {
+    const result = await bashTool({ command: "sleep 5" }, dir, { registry, maxTimeout: 0.2 });
+    expect(result).toContain("Process still running");
+  });
 });
